@@ -913,6 +913,28 @@ async function ligarContaPip(){
   }
 }
 
+async function proximoCodigo2026(){
+  // lê as pastas de obra em 2026 e devolve {ultimo, proximo}
+  let url = '/drives/' + SP_DRIVE + '/root:/' + SP_BASE_2026.split('/').map(encodeURIComponent).join('/') + ':/children?$select=name,folder&$top=200';
+  let maxN = 0, ultimo = '';
+  while (url) {
+    const r = await gFetch(url);
+    const j = await r.json();
+    for (const it of (j.value || [])) {
+      if (!it.folder) continue;
+      const m = String(it.name || '').match(/^ocWG26_(\d{1,4})/i);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n > maxN) { maxN = n; ultimo = it.name; }
+      }
+    }
+    url = j['@odata.nextLink'] || null;  // já é URL absoluto; gFetch aceita
+  }
+  if (!maxN) return null;
+  const proximo = 'ocWG26_' + String(maxN + 1).padStart(3, '0');
+  return { ultimo: 'ocWG26_' + String(maxN).padStart(3, '0'), proximo, ultimoNome: ultimo };
+}
+
 async function criarPastaPedido(pid){
   const p = pedidos.find(x => String(x.id) === String(pid));
   if (!p) return;
@@ -938,9 +960,19 @@ async function criarPastaPedido(pid){
       return;
     }
   }
+  // sugerir o próximo código a partir do que já existe no SharePoint (2026)
+  let sugestaoCodigo = p.codigo || '';
+  let avisoCodigo = '';
+  if (!p.codigo) {
+    toast('A verificar o último código em 2026…');
+    try {
+      const prox = await proximoCodigo2026();
+      if (prox) { sugestaoCodigo = prox.proximo; avisoCodigo = '(último em 2026: ' + prox.ultimo + ')\n'; }
+    } catch (_) { /* se falhar, segue sem sugestão */ }
+  }
   // nome por defeito: «código nome» (ou só o que houver)
-  const base = [p.codigo, p.pedido].filter(Boolean).join(' ').trim() || ('Pedido ' + p.id);
-  let nome = prompt('Nome da pasta a criar em Orçamentos Construção / 2026:', base);
+  const base = [sugestaoCodigo, p.pedido].filter(Boolean).join(' ').trim() || ('Pedido ' + p.id);
+  let nome = prompt(avisoCodigo + 'Nome da pasta a criar em Orçamentos Construção / 2026:', base);
   if (nome === null) return;
   nome = nome.trim().replace(/[\\/:*?"<>|]/g, '-');
   if (!nome) { toast('Nome inválido.', 'erro'); return; }
