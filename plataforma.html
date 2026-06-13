@@ -303,6 +303,11 @@ th .si{opacity:.45;font-size:10px}
 .fu-obra{font-size:11.5px;color:var(--cinza);margin-top:3px}
 .fu-btns{display:flex;gap:2px;flex-shrink:0}
 .fu-vazio{font-size:12.5px;color:var(--cinza);padding:6px 2px 10px}
+/* ===== Triagem de anexos do email ===== */
+.em-anexo{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #e6e6e3;border-radius:10px;margin-bottom:8px}
+.em-anexo-info{flex:1;min-width:0}
+.em-anexo-nome{font-size:13px;font-weight:600;word-break:break-word}
+.em-dest{flex-shrink:0;max-width:190px}
 </style>
 </head>
 <body>
@@ -550,6 +555,17 @@ th .si{opacity:.45;font-size:10px}
       <button class="btn ghost mini" onclick="fuFechar()">✕ Fechar</button>
     </div>
     <div class="am-corpo" id="fuCorpo"></div>
+  </div>
+</div>
+
+<div id="emailOverlay" class="am-overlay">
+  <div class="am-caixa" style="max-width:660px">
+    <div class="am-cab" style="display:flex;justify-content:space-between;align-items:center">
+      <b id="emTitulo">📥 Arquivar email</b>
+      <button class="btn ghost mini" onclick="emFechar()">✕ Fechar</button>
+    </div>
+    <div class="am-corpo" id="emCorpo"></div>
+    <div class="am-acoes" id="emAcoes"></div>
   </div>
 </div>
 
@@ -1015,6 +1031,196 @@ async function criarPastaPedido(pid){
   }
 }
 
+/* ============================================================
+   Arquivar email + anexos na pasta do pedido (triagem)
+   ============================================================ */
+let EM = null;  // estado da triagem: { pid, msgId, subpastas:[{id,nome}], driveId, anexos:[] }
+
+// upload genérico de bytes para uma pasta (pequenos via PUT, grandes via sessão)
+async function spUploadBytes(driveId, itemId, nome, buf){
+  const base = '/drives/' + driveId + '/items/' + itemId;
+  const nomeSeguro = String(nome || 'ficheiro').replace(/[\\/:*?"<>|]/g, '-');
+  if (buf.byteLength <= 4 * 1024 * 1024) {
+    await gFetch(base + ':/' + encodeURIComponent(nomeSeguro) + ':/content', {
+      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: buf
+    });
+  } else {
+    const sess = await (await gFetch(base + ':/' + encodeURIComponent(nomeSeguro) + ':/createUploadSession', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'replace' } })
+    })).json();
+    const total = buf.byteLength, passo = 5 * 1024 * 1024;
+    for (let ini = 0; ini < total; ini += passo) {
+      const fim = Math.min(ini + passo, total);
+      const r = await fetch(sess.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Range': 'bytes ' + ini + '-' + (fim - 1) + '/' + total },
+        body: buf.slice(ini, fim)
+      });
+      if (!r.ok && r.status !== 202) throw new Error('upload interrompido (HTTP ' + r.status + ')');
+    }
+  }
+  return nomeSeguro;
+}
+
+function emFechar(){ $('emailOverlay').classList.remove('aberto'); EM = null; }
+
+async function arquivarEmail(pid){
+  const p = pedidos.find(x => String(x.id) === String(pid));
+  if (!p || !p.sharepoint_url) return;
+  // sessão Microsoft
+  try { spMsal(); } catch (e) { toast(e.message, 'erro'); return; }
+  if (!spConta) {
+    if (!confirm('Para arquivar o email é preciso ligar a tua conta Microsoft.\n\nOK para iniciar sessão agora.')) return;
+    try {
+      const res = await spMsal().loginPopup({ scopes: AZ.scopes, prompt: 'select_account' });
+      spConta = res.account; actualizarSessaoPip();
+    } catch (e) { toast('Não consegui iniciar sessão: ' + (e.errorMessage || e.message || e), 'erro'); return; }
+  }
+
+  $('emTitulo').textContent = '📥 Arquivar email';
+  $('emCorpo').innerHTML = '<div style="padding:18px;color:var(--cinza)">A localizar o email na caixa orcamentos@…</div>';
+  $('emAcoes').innerHTML = '';
+  $('emailOverlay').classList.add('aberto');
+
+  try {
+    // 1) localizar o email → id
+    const u = FN_EMAIL + '?email=' + encodeURIComponent(p.email || '') + '&data=' + encodeURIComponent(p.data || '') + '&assunto=' + encodeURIComponent(p.pedido || '');
+    const jr = await (await fetch(u, { headers: { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key } })).json();
+    if (!jr.ok) { emErro(jr.message || 'Não consegui procurar o email.'); return; }
+    if (!jr.mensagens || !jr.mensagens.length) { emErro('Email não encontrado na caixa orcamentos@ na janela de datas deste pedido.'); return; }
+
+    // se houver mais que um candidato, deixar escolher
+    if (jr.mensagens.length > 1) {
+      emEscolherMensagem(p, jr.mensagens);
+      return;
+    }
+    await emPreparar(p, jr.mensagens[0]);
+  } catch (e) { emErro(e.message); }
+}
+
+function emErro(t){
+  $('emCorpo').innerHTML = '<div style="padding:18px;color:#a33;font-size:13px;white-space:pre-wrap;line-height:1.45">' + esc(t || 'Erro') + '</div>';
+  $('emAcoes').innerHTML = '<button class="btn ghost" onclick="emFechar()">Fechar</button>';
+}
+
+function emEscolherMensagem(p, msgs){
+  $('emCorpo').innerHTML = '<div class="am-sec">Encontrei vários emails — escolhe o certo</div>' +
+    msgs.map((m, i) =>
+      '<div class="pm-item" onclick="emEscolhido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\',' + i + ')">' +
+        '<span class="pm-desc"><b>' + esc(m.assunto || '(sem assunto)') + '</b>' +
+        '<div class="pm-meta">' + esc(m.de || '') + ' · ' + esc(fmtData(m.recebido)) + (m.anexos ? ' · 📎' : '') + '</div></span>' +
+      '</div>'
+    ).join('');
+  $('emAcoes').innerHTML = '<button class="btn ghost" onclick="emFechar()">Cancelar</button>';
+  EM = { candidatos: msgs };
+}
+async function emEscolhido(pid, i){
+  const p = pedidos.find(x => String(x.id) === String(pid));
+  await emPreparar(p, EM.candidatos[i]);
+}
+
+async function emPreparar(p, msg){
+  $('emCorpo').innerHTML = '<div style="padding:18px;color:var(--cinza)">A preparar… a ler a pasta e os anexos.</div>';
+  $('emAcoes').innerHTML = '';
+  try {
+    // resolver a pasta do pedido e listar subpastas
+    const base = await gResolverUrl(p.sharepoint_url);
+    const driveId = base.parentReference && base.parentReference.driveId;
+    if (!driveId || !base.id) throw new Error('não consegui abrir a pasta deste pedido no SharePoint.');
+    const filhos = await gJson('/drives/' + driveId + '/items/' + base.id + '/children?$select=id,name,folder&$top=200');
+    let subpastas = (filhos.value || []).filter(f => f.folder).map(f => ({ id: f.id, nome: f.name }));
+    // garantir Emails
+    let emails = subpastas.find(s => norm(s.nome) === 'emails');
+    if (!emails) {
+      const nova = await (await gFetch('/drives/' + driveId + '/items/' + base.id + '/children', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Emails', folder: {}, '@microsoft.graph.conflictBehavior': 'fail' })
+      })).json();
+      emails = { id: nova.id, nome: 'Emails' };
+      subpastas.unshift(emails);
+    }
+    // listar anexos
+    const ja = await (await fetch(FN_EMAIL + '?acao=anexos&id=' + encodeURIComponent(msg.id), { headers: { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key } })).json();
+    if (!ja.ok) throw new Error(ja.message || 'não consegui listar os anexos.');
+
+    EM = { pid: p.id, msg, driveId, pastaId: base.id, emailsId: emails.id, subpastas, anexos: ja.anexos || [] };
+    emRenderTriagem();
+  } catch (e) { emErro(e.message); }
+}
+
+function emRenderTriagem(){
+  const orc = EM.subpastas.find(s => norm(s.nome) === 'orçamentos' || norm(s.nome) === 'orcamentos');
+  const padraoFich = orc ? orc.id : (EM.subpastas[0] && EM.subpastas[0].id);
+  const fmtT = n => n > 1048576 ? (n/1048576).toFixed(1)+' MB' : (n>1024 ? Math.round(n/1024)+' KB' : n+' B');
+
+  let html = '<div class="am-sec">Email</div>' +
+    '<div class="am-cartao"><div class="am-desc"><b>' + esc(EM.msg.assunto || '(sem assunto)') + '</b></div>' +
+    '<div class="am-meta"><span>' + esc(EM.msg.de || '') + ' · ' + esc(fmtData(EM.msg.recebido)) + '</span><span>→ <b>Emails</b> (.eml)</span></div></div>';
+
+  if (!EM.anexos.length) {
+    html += '<div class="am-sec">Anexos</div><div class="fu-vazio">Este email não tem anexos.</div>';
+  } else {
+    html += '<div class="am-sec">Anexos — escolhe o destino de cada um</div>';
+    html += EM.anexos.map((a, i) => {
+      const ignorar = a.inline;  // inline (assinaturas) → não carregar por defeito
+      return '<div class="em-anexo">' +
+        '<div class="em-anexo-info"><div class="em-anexo-nome">' + (a.inline ? '🖼️ ' : '📄 ') + esc(a.nome) + '</div>' +
+        '<div class="pm-meta">' + fmtT(a.tamanho) + (a.inline ? ' · inline (provável assinatura)' : '') + '</div></div>' +
+        '<select class="sel-mini em-dest" data-i="' + i + '">' +
+          '<option value="__ignorar"' + (ignorar ? ' selected' : '') + '>— não carregar —</option>' +
+          emOpcoesSubpastaDefault(ignorar ? null : padraoFich) +
+        '</select>' +
+      '</div>';
+    }).join('');
+  }
+  $('emCorpo').innerHTML = html;
+  $('emAcoes').innerHTML = '<button class="btn ghost" onclick="emFechar()">Cancelar</button>' +
+    '<button class="btn primario" onclick="emExecutar()">Arquivar na pasta</button>';
+}
+
+function emOpcoesSubpastaDefault(selId){
+  return EM.subpastas.map(s => '<option value="' + esc(s.id) + '"' + (s.id === selId ? ' selected' : '') + '>' + esc(s.nome) + '</option>').join('');
+}
+
+async function emExecutar(){
+  // ler escolhas antes de mexer no DOM
+  const escolhas = [...document.querySelectorAll('.em-dest')].map(sel => ({ i: +sel.dataset.i, dest: sel.value }));
+  $('emCorpo').innerHTML = '<div style="padding:18px;color:var(--cinza)">A arquivar… não feches a janela.</div>';
+  $('emAcoes').innerHTML = '';
+  const headersEmail = { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key };
+  let okEml = false, nAnexos = 0, erros = [];
+
+  // 1) .eml → Emails
+  try {
+    const r = await fetch(FN_EMAIL + '?acao=eml&id=' + encodeURIComponent(EM.msg.id), { headers: headersEmail });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'falha ao obter o .eml');
+    const buf = await r.arrayBuffer();
+    const nomeEml = ((EM.msg.assunto || 'email').trim().slice(0, 80)) + '.eml';
+    await spUploadBytes(EM.driveId, EM.emailsId, nomeEml, buf);
+    okEml = true;
+  } catch (e) { erros.push('Email: ' + e.message); }
+
+  // 2) anexos escolhidos
+  for (const c of escolhas) {
+    if (c.dest === '__ignorar') continue;
+    const a = EM.anexos[c.i];
+    try {
+      const r = await fetch(FN_EMAIL + '?acao=anexo&id=' + encodeURIComponent(EM.msg.id) + '&anexo=' + encodeURIComponent(a.id), { headers: headersEmail });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'falha ao obter');
+      const buf = await r.arrayBuffer();
+      await spUploadBytes(EM.driveId, c.dest, a.nome, buf);
+      nAnexos++;
+    } catch (e) { erros.push(a.nome + ': ' + e.message); }
+  }
+
+  const resumo = (okEml ? '✓ Email arquivado em Emails' : '✗ Email não arquivado') +
+    ' · ' + nAnexos + ' anexo(s) carregado(s)' + (erros.length ? '\n\nProblemas:\n• ' + erros.join('\n• ') : '');
+  $('emCorpo').innerHTML = '<div style="padding:18px;font-size:13px;white-space:pre-wrap;line-height:1.5' + (erros.length ? ';color:#a33' : '') + '">' + esc(resumo) + '</div>';
+  $('emAcoes').innerHTML = '<button class="btn primario" onclick="emFechar()">Fechar</button>';
+  if (okEml && !erros.length) toast('✓ Arquivado na pasta do pedido');
+}
+
 function renderPipeline(){
   const q = norm($('pipPesquisa').value);
   const fe = $('pipEstado').value;
@@ -1038,6 +1244,7 @@ function renderPipeline(){
         ? '<a href="' + esc(p.sharepoint_url) + '" target="_blank" rel="noopener" title="Pasta no SharePoint" style="text-decoration:none">📁</a> '
         : '<a href="#" onclick="criarPastaPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Criar pasta no SharePoint (2026)" style="text-decoration:none">📂⁺</a> ') +
       '<a href="#" onclick="emailPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\', window.open(\'\',\'_blank\')); return false" title="Abrir o email original no Outlook" style="text-decoration:none">✉️</a>' +
+      (p.sharepoint_url ? ' <a href="#" onclick="arquivarEmail(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Arquivar o email e anexos na pasta" style="text-decoration:none">📥</a>' : '') +
     '</td>' +
     '<td><button class="btn ghost mini" onclick="orcamentarPedido(\'' + esc(p.id).replace(/'/g, "\\'") + '\')">Orçamentar →</button></td>' +
     '</tr>'
