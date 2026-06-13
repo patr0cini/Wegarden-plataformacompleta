@@ -337,6 +337,7 @@ th .si{opacity:.45;font-size:10px}
         <option value="">Todos os estados</option>
       </select>
       <button class="btn ghost mini" onclick="carregarPedidos()" title="Reler a pipeline">↻ Actualizar</button>
+      <span id="pipSessao" style="margin-left:auto;font-size:12px;color:var(--cinza)"></span>
     </div>
     <div class="tabela-wrap">
       <table>
@@ -886,6 +887,99 @@ function chipPedido(estado){
   return '<span class="chip ' + (m[estado] || 'cinza') + '">' + esc(estado || '—') + '</span>';
 }
 
+function actualizarSessaoPip(){
+  const el = $('pipSessao');
+  if (!el) return;
+  if (spConta)
+    el.innerHTML = '🟢 Microsoft: <b>' + esc(spConta.name || spConta.username) + '</b> · <a href="#" onclick="spLogout();actualizarSessaoPip();return false">sair</a>';
+  else
+    el.innerHTML = '⚪ Microsoft não ligado · <a href="#" onclick="ligarContaPip();return false">ligar conta</a>';
+}
+
+async function ligarContaPip(){
+  try { spMsal(); } catch (e) { toast(e.message, 'erro'); return; }
+  try {
+    const res = await spMsal().loginPopup({ scopes: AZ.scopes, prompt: 'select_account' });
+    spConta = res.account;
+    toast('Sessão iniciada: ' + (spConta.name || spConta.username));
+    actualizarSessaoPip();
+  } catch (e) {
+    const txt = String(e.errorMessage || e.message || e);
+    if (txt.includes('user_cancelled')) return;
+    if (/redirect_uri|reply.*url|AADSTS50011/i.test(txt))
+      toast('O endereço desta página não está autorizado no Azure. Abre a versão publicada (github.io), não o ficheiro do disco.', 'erro');
+    else
+      toast('Não consegui iniciar sessão: ' + txt, 'erro');
+  }
+}
+
+async function criarPastaPedido(pid){
+  const p = pedidos.find(x => String(x.id) === String(pid));
+  if (!p) return;
+  // garantir sessão Microsoft (reutiliza o login do SharePoint)
+  try { spMsal(); } catch (e) { toast(e.message, 'erro'); return; }
+  if (!spConta) {
+    // ligar a conta aqui mesmo, sem ter de ir à Orçamentação
+    if (!confirm('Para criar a pasta é preciso ligar a tua conta Microsoft.\n\nOK para iniciar sessão agora.')) return;
+    try {
+      const res = await spMsal().loginPopup({ scopes: AZ.scopes, prompt: 'select_account' });
+      spConta = res.account;
+      toast('Sessão iniciada: ' + (spConta.name || spConta.username));
+      actualizarSessaoPip();
+    } catch (e) {
+      const txt = String(e.errorMessage || e.message || e);
+      if (txt.includes('user_cancelled')) return;
+      if (/redirect_uri|reply.*url|AADSTS50011/i.test(txt))
+        toast('O endereço desta página não está autorizado no Azure. Abre a versão publicada (github.io), não o ficheiro do disco.', 'erro');
+      else if (/consent|AADSTS65001|admin/i.test(txt))
+        toast('Falta consentimento de administrador para o SharePoint no registo Azure.', 'erro');
+      else
+        toast('Não consegui iniciar sessão: ' + txt, 'erro');
+      return;
+    }
+  }
+  // nome por defeito: «código nome» (ou só o que houver)
+  const base = [p.codigo, p.pedido].filter(Boolean).join(' ').trim() || ('Pedido ' + p.id);
+  let nome = prompt('Nome da pasta a criar em Orçamentos Construção / 2026:', base);
+  if (nome === null) return;
+  nome = nome.trim().replace(/[\\/:*?"<>|]/g, '-');
+  if (!nome) { toast('Nome inválido.', 'erro'); return; }
+  toast('A criar a pasta no SharePoint…');
+  try {
+    // criar a pasta principal dentro da base de 2026
+    const alvo = '/drives/' + SP_DRIVE + '/root:/' + SP_BASE_2026.split('/').map(encodeURIComponent).join('/') + ':/children';
+    const r = await gFetch(alvo, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: nome, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' })
+    });
+    const pasta = await r.json();
+    // subpastas padrão
+    for (const sub of ['Emails', 'Orçamentos', 'Peças desenhadas']) {
+      try {
+        await gFetch('/drives/' + SP_DRIVE + '/items/' + pasta.id + '/children', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: sub, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' })
+        });
+      } catch (_) { /* se já existir, segue */ }
+    }
+    const url = pasta.webUrl || (SP_BASE_URL_2026 + '/' + nome);
+    // gravar o link na pipeline para o 📁 passar a aparecer
+    await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(p.id), {
+      method: 'PATCH', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify({ sharepoint_url: url })
+    });
+    p.sharepoint_url = url;
+    renderPipeline();
+    toast('✓ Pasta criada: ' + nome);
+  } catch (e) {
+    const msg = String(e.message || e);
+    if (/nameAlreadyExists|conflict|already exists/i.test(msg))
+      toast('Já existe uma pasta com esse nome em 2026.', 'erro');
+    else
+      toast('Não consegui criar a pasta: ' + msg, 'erro');
+  }
+}
+
 function renderPipeline(){
   const q = norm($('pipPesquisa').value);
   const fe = $('pipEstado').value;
@@ -905,12 +999,15 @@ function renderPipeline(){
     '<td>' + selEstadoPedido(p) + '</td>' +
     '<td>' + selRespPedido(p) + '</td>' +
     '<td style="text-align:center;white-space:nowrap">' +
-      (p.sharepoint_url ? '<a href="' + esc(p.sharepoint_url) + '" target="_blank" rel="noopener" title="Pasta no SharePoint" style="text-decoration:none">📁</a> ' : '') +
+      (p.sharepoint_url
+        ? '<a href="' + esc(p.sharepoint_url) + '" target="_blank" rel="noopener" title="Pasta no SharePoint" style="text-decoration:none">📁</a> '
+        : '<a href="#" onclick="criarPastaPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Criar pasta no SharePoint (2026)" style="text-decoration:none">📂⁺</a> ') +
       '<a href="#" onclick="emailPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\', window.open(\'\',\'_blank\')); return false" title="Abrir o email original no Outlook" style="text-decoration:none">✉️</a>' +
     '</td>' +
     '<td><button class="btn ghost mini" onclick="orcamentarPedido(\'' + esc(p.id).replace(/'/g, "\\'") + '\')">Orçamentar →</button></td>' +
     '</tr>'
   ).join('') : '<tr><td colspan="10" class="vazio">Nenhum pedido corresponde aos filtros.</td></tr>';
+  actualizarSessaoPip();
 }
 
 function orcamentarPedido(pid){
@@ -1343,6 +1440,10 @@ const AZ = {
   tenant: '3ef27ff6-10f7-4057-a88e-4755e9a86382',
   scopes: ['User.Read', 'Sites.ReadWrite.All']
 };
+// Biblioteca «Documentos Partilhados» do site Orçamentos Construção + pasta-base de 2026
+const SP_DRIVE = 'b!-BPcjeFXYECehfWFz692fHHiljGQw6pMmHl16QXKy4luNDh-HvGgQYA84Zd0UmlQ';
+const SP_BASE_2026 = 'Orçamentos Construção/2026';
+const SP_BASE_URL_2026 = 'https://wegarden.sharepoint.com/sites/OramentosConstruo/Documentos Partilhados/Orçamentos Construção/2026';
 let msalApp = null, spConta = null;
 let spModo = 'importar';           // 'importar' | 'guardar'
 let spPilha = [];                  // navegação: {tipo:'inicio'|'sites'|'drives'|'pasta', ...}
