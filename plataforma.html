@@ -914,25 +914,23 @@ async function ligarContaPip(){
 }
 
 async function proximoCodigo2026(){
-  // lê as pastas de obra em 2026 e devolve {ultimo, proximo}
-  let url = '/drives/' + SP_DRIVE + '/root:/' + SP_BASE_2026.split('/').map(encodeURIComponent).join('/') + ':/children?$select=name,folder&$top=200';
-  let maxN = 0, ultimo = '';
+  // resolver a pasta de 2026 pela URL (robusto com token delegado), depois listar por ID
+  const base = await gResolverUrl(SP_BASE_URL_2026);
+  const driveId = base.parentReference && base.parentReference.driveId;
+  if (!driveId || !base.id) throw new Error('não consegui localizar a pasta de 2026');
+  let url = '/drives/' + driveId + '/items/' + base.id + '/children?$select=name,folder&$top=200';
+  let maxN = 0;
   while (url) {
-    const r = await gFetch(url);
-    const j = await r.json();
+    const j = await gJson(url);
     for (const it of (j.value || [])) {
       if (!it.folder) continue;
       const m = String(it.name || '').match(/^ocWG26_(\d{1,4})/i);
-      if (m) {
-        const n = parseInt(m[1], 10);
-        if (n > maxN) { maxN = n; ultimo = it.name; }
-      }
+      if (m) { const n = parseInt(m[1], 10); if (n > maxN) maxN = n; }
     }
-    url = j['@odata.nextLink'] || null;  // já é URL absoluto; gFetch aceita
+    url = j['@odata.nextLink'] || null;
   }
   if (!maxN) return null;
-  const proximo = 'ocWG26_' + String(maxN + 1).padStart(3, '0');
-  return { ultimo: 'ocWG26_' + String(maxN).padStart(3, '0'), proximo, ultimoNome: ultimo };
+  return { ultimo: 'ocWG26_' + String(maxN).padStart(3, '0'), proximo: 'ocWG26_' + String(maxN + 1).padStart(3, '0') };
 }
 
 async function criarPastaPedido(pid){
@@ -968,7 +966,10 @@ async function criarPastaPedido(pid){
     try {
       const prox = await proximoCodigo2026();
       if (prox) { sugestaoCodigo = prox.proximo; avisoCodigo = '(último em 2026: ' + prox.ultimo + ')\n'; }
-    } catch (_) { /* se falhar, segue sem sugestão */ }
+      else avisoCodigo = '(não encontrei códigos em 2026)\n';
+    } catch (e) {
+      avisoCodigo = '(não consegui ler o último código: ' + String(e.message || e).slice(0, 80) + ')\n';
+    }
   }
   // nome por defeito: «código nome» (ou só o que houver)
   const base = [sugestaoCodigo, p.pedido].filter(Boolean).join(' ').trim() || ('Pedido ' + p.id);
@@ -978,9 +979,11 @@ async function criarPastaPedido(pid){
   if (!nome) { toast('Nome inválido.', 'erro'); return; }
   toast('A criar a pasta no SharePoint…');
   try {
-    // criar a pasta principal dentro da base de 2026
-    const alvo = '/drives/' + SP_DRIVE + '/root:/' + SP_BASE_2026.split('/').map(encodeURIComponent).join('/') + ':/children';
-    const r = await gFetch(alvo, {
+    // resolver a pasta-base de 2026 e criar lá dentro (por ID, sem caminhos acentuados)
+    const base2026 = await gResolverUrl(SP_BASE_URL_2026);
+    const driveId = (base2026.parentReference && base2026.parentReference.driveId);
+    if (!driveId || !base2026.id) throw new Error('não localizei a pasta de 2026');
+    const r = await gFetch('/drives/' + driveId + '/items/' + base2026.id + '/children', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: nome, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' })
@@ -989,7 +992,7 @@ async function criarPastaPedido(pid){
     // subpastas padrão
     for (const sub of ['Emails', 'Orçamentos', 'Peças desenhadas']) {
       try {
-        await gFetch('/drives/' + SP_DRIVE + '/items/' + pasta.id + '/children', {
+        await gFetch('/drives/' + driveId + '/items/' + pasta.id + '/children', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: sub, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' })
         });
