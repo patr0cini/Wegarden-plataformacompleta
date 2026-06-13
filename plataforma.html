@@ -558,6 +558,12 @@ th .si{opacity:.45;font-size:10px}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/msal-browser/2.38.4/msal-browser.min.js"></script>
 <script>
+  // Garante o MSAL mesmo que o cdnjs esteja bloqueado nesta rede
+  if (typeof msal === 'undefined') {
+    document.write('<script src="https://alcdn.msauth.net/browser/2.38.4/js/msal-browser.min.js"><\/script>');
+  }
+</script>
+<script>
 /* ============================================================
    Configuração
    ============================================================ */
@@ -1275,6 +1281,9 @@ let spModo = 'importar';           // 'importar' | 'guardar'
 let spPilha = [];                  // navegação: {tipo:'inicio'|'sites'|'drives'|'pasta', ...}
 
 function spMsal(){
+  if (typeof msal === 'undefined' || !msal.PublicClientApplication) {
+    throw new Error('A biblioteca de login da Microsoft não carregou (pode estar bloqueada nesta rede). Recarrega a página; se persistir, tenta noutra rede ou avisa-me.');
+  }
   if (!msalApp) {
     msalApp = new msal.PublicClientApplication({
       auth: {
@@ -1388,9 +1397,13 @@ function spAbrirModo(modo){
   if (!atual) return;
   spModo = modo;
   $('spOverlay').classList.add('aberto');
-  spMsal();
-  if (!spConta) spVistaLogin();
-  else spInicio();
+  try {
+    spMsal();
+    if (!spConta) spVistaLogin();
+    else spInicio();
+  } catch (e) {
+    spErro(e.message || String(e));
+  }
 }
 function spFechar(){ $('spOverlay').classList.remove('aberto'); }
 
