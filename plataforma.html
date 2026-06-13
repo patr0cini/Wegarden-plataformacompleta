@@ -1,0 +1,2179 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>We Garden · Plataforma Comercial</title>
+<style>
+:root{
+  --verde:#1F4D2E;
+  --verde-claro:#3D7A4E;
+  --verde-suave:#E8F0EA;
+  --cal:#F7F5F0;
+  --branco:#FFFFFF;
+  --tinta:#22241F;
+  --cinza:#6B6F66;
+  --linha:#E3E0D8;
+  --terra:#9C6B3F;
+  --erro:#A33B2E;
+  --erro-suave:#F6E7E4;
+  --ambar:#8A6D1F;
+  --ambar-suave:#F5EED8;
+  --azul:#2B5E73;
+  --azul-suave:#E2EEF2;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  background:var(--cal);
+  color:var(--tinta);
+  font-size:14px;
+  min-height:100vh;
+}
+h1,h2,h3,.tab{font-family:'Trebuchet MS','Segoe UI',sans-serif}
+
+/* ---------- Topo ---------- */
+header{
+  background:var(--branco);
+  border-bottom:1px solid var(--linha);
+  padding:0 28px;
+  display:flex;align-items:center;gap:32px;
+  position:sticky;top:0;z-index:50;
+}
+.marca{
+  font-family:Garamond,'Times New Roman',serif;
+  font-size:22px;color:var(--verde);
+  padding:16px 0;white-space:nowrap;
+  display:flex;align-items:center;gap:8px;
+}
+.marca svg{width:18px;height:18px}
+.marca small{
+  font-family:'Trebuchet MS',sans-serif;font-size:10px;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--cinza);
+  border-left:1px solid var(--linha);padding-left:10px;margin-left:2px;
+}
+nav{display:flex;gap:4px;flex:1}
+.tab{
+  background:none;border:none;cursor:pointer;
+  font-size:14px;color:var(--cinza);
+  padding:20px 16px 17px;
+  border-bottom:3px solid transparent;
+  transition:color .15s,border-color .15s;
+}
+.tab:hover{color:var(--tinta)}
+.tab.ativa{color:var(--verde);border-bottom-color:var(--verde);font-weight:700}
+#precosChip{
+  font-size:12px;color:var(--cinza);
+  display:flex;align-items:center;gap:8px;
+  padding:6px 12px;border:1px solid var(--linha);border-radius:99px;
+  background:var(--cal);white-space:nowrap;
+}
+#precosChip .ponto{width:8px;height:8px;border-radius:50%;background:#C9C5BA;flex:none}
+#precosChip.ok .ponto{background:var(--verde-claro)}
+#precosChip.erro .ponto{background:var(--erro)}
+#precosChip button{
+  background:none;border:none;cursor:pointer;color:var(--verde);
+  font-size:12px;padding:0;text-decoration:underline;
+}
+
+/* ---------- Conteúdo ---------- */
+main{max-width:1280px;margin:0 auto;padding:28px}
+.painel{display:none}
+.painel.ativa{display:block}
+.painel-topo{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+.painel-topo h2{font-size:19px;color:var(--verde)}
+.painel-topo p{color:var(--cinza);font-size:13px;margin-top:3px}
+.aviso-leitura{
+  font-size:12px;color:var(--cinza);
+  background:var(--verde-suave);border:1px solid #D5E2D8;
+  padding:6px 12px;border-radius:6px;
+}
+.filtros{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+input[type=text],input[type=email],select,textarea{
+  font:inherit;color:var(--tinta);
+  border:1px solid var(--linha);border-radius:6px;
+  padding:8px 11px;background:var(--branco);
+  outline:none;
+}
+input:focus,select:focus,textarea:focus{border-color:var(--verde-claro);box-shadow:0 0 0 3px rgba(61,122,78,.12)}
+.filtros input[type=text]{min-width:260px}
+
+/* ---------- Tabelas ---------- */
+.tabela-wrap{background:var(--branco);border:1px solid var(--linha);border-radius:10px;overflow:auto}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{
+  text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--cinza);font-weight:600;
+  padding:11px 14px;border-bottom:1px solid var(--linha);
+  background:var(--branco);position:sticky;top:0;
+  white-space:nowrap;
+}
+td{padding:10px 14px;border-bottom:1px solid #EFEDE6;vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+tbody tr.clicavel{cursor:pointer}
+tbody tr.clicavel:hover{background:#FAF9F4}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.vazio{padding:48px 20px;text-align:center;color:var(--cinza);font-size:13.5px}
+
+/* ---------- Chips de estado ---------- */
+.chip{
+  display:inline-block;font-size:11.5px;font-weight:600;
+  padding:3px 10px;border-radius:99px;white-space:nowrap;
+}
+.chip.cinza{background:#EFEDE6;color:var(--cinza)}
+.chip.ambar{background:var(--ambar-suave);color:var(--ambar)}
+.chip.azul{background:var(--azul-suave);color:var(--azul)}
+.chip.verde{background:var(--verde-suave);color:var(--verde)}
+.chip.verde-solido{background:var(--verde);color:#fff}
+.chip.erro{background:var(--erro-suave);color:var(--erro)}
+.chip.terra{background:#F2E9DF;color:var(--terra)}
+
+.sel-mini{padding:4px 8px;font-size:12.5px;max-width:160px}
+
+/* ---------- Botões ---------- */
+.btn{
+  font:inherit;cursor:pointer;border-radius:7px;
+  padding:8px 16px;border:1px solid transparent;
+  transition:background .15s,border-color .15s;
+  white-space:nowrap;
+}
+.btn.primario{background:var(--verde);color:#fff;font-weight:600}
+.btn.primario:hover{background:#173E24}
+.btn.ghost{background:var(--branco);border-color:var(--linha);color:var(--tinta)}
+.btn.ghost:hover{border-color:var(--verde-claro);color:var(--verde)}
+.btn.mini{padding:4px 10px;font-size:12.5px}
+.btn.perigo{background:none;border:none;color:var(--erro);font-size:15px;padding:2px 6px;cursor:pointer;opacity:.55}
+.btn.perigo:hover{opacity:1}
+.btn:disabled{opacity:.5;cursor:default}
+
+/* ---------- Editor de orçamento ---------- */
+#editorCabecalho{
+  background:var(--branco);border:1px solid var(--linha);border-radius:10px;
+  padding:18px 20px;margin-bottom:16px;
+  display:grid;grid-template-columns:repeat(6,1fr);gap:12px 14px;
+}
+#editorCabecalho label{
+  display:flex;flex-direction:column;gap:5px;
+  font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--cinza);font-weight:600;
+}
+#editorCabecalho label.c2{grid-column:span 2}
+#editorCabecalho label.c6{grid-column:span 6}
+#editorCabecalho input,#editorCabecalho select,#editorCabecalho textarea{font-size:13.5px}
+#editorCabecalho textarea{resize:vertical;min-height:38px}
+
+.editor-barra{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.editor-barra .sep{flex:1}
+
+.pesquisa-wrap{position:relative;margin-bottom:12px}
+.pesquisa-wrap input{width:100%;padding:11px 14px;font-size:14px}
+#resultadosPrecos{
+  position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:40;
+  background:var(--branco);border:1px solid var(--linha);border-radius:8px;
+  box-shadow:0 10px 30px rgba(34,36,31,.12);
+  max-height:340px;overflow:auto;display:none;
+}
+#resultadosPrecos.aberto{display:block}
+.resultado{
+  display:flex;align-items:baseline;gap:12px;
+  padding:9px 14px;cursor:pointer;border-bottom:1px solid #F2F0E9;font-size:13px;
+}
+.resultado:last-child{border-bottom:none}
+.resultado:hover{background:var(--verde-suave)}
+.resultado .desc{flex:1}
+.resultado .un{color:var(--cinza);font-size:12px;flex:none}
+.resultado .preco{font-variant-numeric:tabular-nums;font-weight:600;color:var(--verde);flex:none}
+.resultado-nota{padding:9px 14px;font-size:12.5px;color:var(--cinza)}
+
+#tabelaLinhas td{padding:6px 10px}
+#tabelaLinhas input{width:100%;border-color:transparent;background:transparent;padding:6px 8px;border-radius:5px}
+#tabelaLinhas input:hover{border-color:var(--linha)}
+#tabelaLinhas input:focus{background:var(--branco);border-color:var(--verde-claro)}
+#tabelaLinhas input.num{text-align:right;font-variant-numeric:tabular-nums}
+#tabelaLinhas tr.capitulo td{background:#F1EFE8;font-weight:700}
+#tabelaLinhas tr.subcapitulo td{background:#F8F6F0;font-weight:600}
+#tabelaLinhas tr.capitulo input,#tabelaLinhas tr.subcapitulo input{font-weight:inherit}
+#tabelaLinhas .col-num{width:80px;color:var(--cinza);font-variant-numeric:tabular-nums;white-space:nowrap}
+#tabelaLinhas .col-total{width:120px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+#tabelaLinhas .col-acao{width:64px;text-align:center;white-space:nowrap}
+tfoot td{font-weight:700;font-size:15px;background:var(--branco);border-top:2px solid var(--verde)}
+
+/* ---------- Histórico ---------- */
+.followups{margin:4px 0 0;padding:0;list-style:none;font-size:12.5px;color:var(--cinza)}
+.followups li{padding:2px 0}
+.followups li b{color:var(--tinta);font-weight:600}
+
+/* ---------- Toast ---------- */
+#toast{
+  position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);
+  background:var(--tinta);color:#fff;padding:11px 20px;border-radius:8px;
+  font-size:13.5px;opacity:0;transition:all .25s;z-index:100;pointer-events:none;
+  max-width:90vw;
+}
+#toast.visivel{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast.erro{background:var(--erro)}
+
+footer{
+  text-align:center;color:#A8AB9F;font-size:11.5px;
+  padding:30px 20px 26px;
+}
+@media (max-width:900px){
+  #editorCabecalho{grid-template-columns:repeat(2,1fr)}
+  #editorCabecalho label.c2,#editorCabecalho label.c6{grid-column:span 2}
+  header{padding:0 14px;gap:14px;overflow-x:auto}
+  main{padding:16px}
+}
+/* ===== Painel de matching ===== */
+#tabelaLinhas .col-num.clicavel{cursor:pointer}
+#tabelaLinhas .col-num.clicavel:hover{color:#2e6b2a;text-decoration:underline}
+#tabelaLinhas tr.linha-ativa td{background:#eef4ec}
+.btn-ico{border:0;background:none;cursor:pointer;font-size:14px;padding:2px;line-height:1}
+.painel-match{position:fixed;top:0;right:0;bottom:0;width:460px;max-width:92vw;background:#fff;border-left:1px solid #ddd;box-shadow:-8px 0 24px rgba(0,0,0,.10);z-index:60;display:flex;flex-direction:column}
+.painel-match[hidden]{display:none}
+.pm-topo{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid #eee}
+.pm-topo b{font-size:15px}
+.pm-alvo{padding:10px 16px;font-size:12.5px;color:var(--cinza);border-bottom:1px solid #f0f0f0;line-height:1.4}
+.painel-match > input{margin:10px 16px 6px;padding:8px 10px;border:1px solid #ccc;border-radius:8px;font-size:13px}
+.pm-lista{flex:1;overflow:auto;padding:0 8px 16px}
+.pm-item{display:flex;gap:10px;align-items:flex-start;padding:10px;border-radius:8px;cursor:pointer;border-bottom:1px solid #f3f3f3}
+.pm-item:hover{background:#f5f7f4}
+.pm-badge{min-width:46px;text-align:center;font-weight:700;font-size:12px;border-radius:6px;padding:3px 0}
+.pm-badge.alto{background:#e3f1e1;color:#2e6b2a}
+.pm-badge.medio{background:#fdf3dd;color:#8a6612}
+.pm-badge.baixo{background:#f0f0f0;color:#777}
+.pm-desc{flex:1;font-size:12.5px;line-height:1.35}
+.pm-meta{font-size:11.5px;color:var(--cinza);margin-top:2px}
+.pm-preco{font-weight:700;font-size:12.5px;white-space:nowrap}
+/* ===== Overlays: assistente de match e SharePoint ===== */
+.am-overlay{position:fixed;inset:0;background:rgba(20,26,18,.45);z-index:80;display:none;align-items:center;justify-content:center;padding:20px}
+.am-overlay.aberto{display:flex}
+.am-caixa{background:#fff;border-radius:14px;width:100%;max-width:680px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(0,0,0,.25);overflow:hidden}
+.am-cab{padding:14px 18px;border-bottom:1px solid #eee}
+.am-cab > b{font-size:15px}
+.am-prog{height:6px;background:#eee;border-radius:3px;margin-top:10px;overflow:hidden}
+.am-prog > div{height:100%;width:0;background:#2e6b2a;transition:width .15s}
+.am-stats{display:flex;gap:14px;margin-top:8px;font-size:12px;color:var(--cinza);flex-wrap:wrap}
+.am-stats b{color:#222}
+.am-corpo{padding:16px 18px;overflow:auto}
+.am-sec{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--cinza);margin:10px 0 6px}
+.am-sec:first-child{margin-top:0}
+.am-cartao{border:1px solid #e4e4e4;border-radius:10px;padding:12px 14px;background:#fafafa}
+.am-cartao.match{border-color:#bcd8b8;background:#f4f9f3}
+.am-cartao .am-desc{font-size:13px;line-height:1.4}
+.am-cartao .am-meta{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--cinza);margin-top:8px;flex-wrap:wrap}
+.am-linha-match{display:flex;align-items:flex-start;gap:10px}
+.am-linha-match .am-desc{flex:1}
+.am-pct{font-weight:700;font-size:12px;border-radius:6px;padding:3px 8px;white-space:nowrap}
+.am-pct.alto{background:#e3f1e1;color:#2e6b2a}
+.am-pct.medio{background:#fdf3dd;color:#8a6612}
+.am-teclas{margin-top:12px;font-size:12px;color:var(--cinza)}
+.am-acoes{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #eee}
+.am-resumo{text-align:center;padding:10px 0}
+.am-resumo .nums{display:flex;justify-content:center;gap:26px;margin-top:14px}
+.am-resumo .nums > div{display:flex;flex-direction:column;font-size:12px;color:var(--cinza)}
+.am-resumo .nums b{font-size:20px}
+/* ===== Histórico: ordenação, grau de interesse, edição ===== */
+th.ordenavel{cursor:pointer;user-select:none;white-space:nowrap}
+th.ordenavel:hover{color:#2e6b2a}
+th .si{opacity:.45;font-size:10px}
+.grau{display:inline-block;font-size:11px;font-weight:700;border-radius:6px;padding:2px 8px;white-space:nowrap}
+.g-baixo{background:#efefef;color:#777}
+.g-medio{background:#fdf3dd;color:#8a6612}
+.g-alto{background:#e3f1e1;color:#2e6b2a}
+.g-muitoalto{background:#2e6b2a;color:#fff}
+.resp-pill{display:inline-block;font-size:11px;background:#eef2ee;border:1px solid #d8e2d6;border-radius:999px;padding:2px 8px;white-space:nowrap}
+.b-nota{display:inline-block;min-width:18px;text-align:center;font-size:11px;font-weight:700;background:#fdf3dd;color:#8a6612;border-radius:6px;padding:2px 6px}
+#histCorpo tr.clicavel-linha{cursor:pointer}
+#histCorpo tr.clicavel-linha:hover td{background:#f6f9f5}
+.hist-form{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
+.hist-form .full{grid-column:1/-1}
+.hist-form label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--cinza);margin-bottom:4px}
+.hist-form input,.hist-form select,.hist-form textarea{width:100%;padding:7px 9px;border:1px solid #ccc;border-radius:8px;font-size:13px;font-family:inherit;background:#fff}
+.hist-form input:disabled{background:#f3f3f1;color:#888}
+/* ===== Quadro de follow-ups ===== */
+.fu-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;border-radius:999px;background:#c0392b;color:#fff;font-size:11px;font-weight:700}
+.fu-item{display:flex;gap:10px;align-items:flex-start;border:1px solid #e6e6e3;border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff}
+.fu-item.atraso{border-color:#e7b9b3;background:#fdf6f5}
+.fu-item.hoje{border-color:#e3cf9a;background:#fdfaf0}
+.fu-item.feito{opacity:.6}
+.fu-item.feito .fu-texto{text-decoration:line-through}
+.fu-conteudo{flex:1;min-width:0}
+.fu-data{font-size:11.5px;color:var(--cinza);margin-bottom:3px}
+.fu-item.atraso .fu-data{color:#a33;font-weight:600}
+.fu-texto{font-size:13px;line-height:1.35}
+.fu-obra{font-size:11.5px;color:var(--cinza);margin-top:3px}
+.fu-btns{display:flex;gap:2px;flex-shrink:0}
+.fu-vazio{font-size:12.5px;color:var(--cinza);padding:6px 2px 10px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="marca">
+    <svg viewBox="0 0 24 24" fill="none"><path d="M12 21C12 13 7 9 3 8c0 8 4 13 9 13Zm0 0c0-9 4-14 9-15-1 9-4 15-9 15Z" stroke="#1F4D2E" stroke-width="1.6" stroke-linejoin="round"/></svg>
+    WeGarden <small>Plataforma Comercial</small>
+  </div>
+  <nav>
+    <button class="tab" data-tab="pipeline" onclick="mudarTab('pipeline')">Pipeline</button>
+    <button class="tab" data-tab="orcamentacao" onclick="mudarTab('orcamentacao')">Orçamentação</button>
+    <button class="tab" data-tab="historico" onclick="mudarTab('historico')">Histórico</button>
+  </nav>
+  <div id="precosChip"><span class="ponto"></span><span id="precosTexto">Tabela de preços: a carregar…</span><button onclick="carregarPrecos()" title="Recarregar do SharePoint">↻</button></div>
+</header>
+
+<main>
+
+  <!-- ================= PIPELINE ================= -->
+  <section class="painel" id="painel-pipeline">
+    <div class="painel-topo">
+      <div>
+        <h2>Pedidos de orçamento</h2>
+        <p>Vindos da pipeline existente, em tempo real.</p>
+      </div>
+      <span class="aviso-leitura">Ligado à pipeline existente · estado e responsável gravam directamente lá</span>
+    </div>
+    <div class="filtros">
+      <input type="text" id="pipPesquisa" placeholder="Pesquisar pedido, remetente, localização…" oninput="renderPipeline()">
+      <select id="pipEstado" onchange="renderPipeline()">
+        <option value="">Todos os estados</option>
+      </select>
+      <button class="btn ghost mini" onclick="carregarPedidos()" title="Reler a pipeline">↻ Actualizar</button>
+    </div>
+    <div class="tabela-wrap">
+      <table>
+        <thead><tr>
+          <th>Data</th><th>Código</th><th>Pedido</th><th>Remetente</th><th>Localização</th><th>Tipo</th><th>Estado</th><th>Resp.</th><th>Ligações</th><th></th>
+        </tr></thead>
+        <tbody id="pipCorpo"><tr><td colspan="10" class="vazio">A carregar pedidos…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= ORÇAMENTAÇÃO ================= -->
+  <section class="painel" id="painel-orcamentacao">
+
+    <div id="orcLista">
+      <div class="painel-topo">
+        <div>
+          <h2>Orçamentos</h2>
+          <p>Elaborados nesta plataforma.</p>
+        </div>
+        <button class="btn primario" onclick="novoOrcamento()">+ Novo orçamento</button>
+      </div>
+      <div class="tabela-wrap">
+        <table>
+          <thead><tr>
+            <th>Código</th><th>Obra</th><th>Cliente</th><th>Estado</th><th class="num">Total</th><th>Actualizado</th><th></th>
+          </tr></thead>
+          <tbody id="orcCorpo"><tr><td colspan="7" class="vazio">A carregar…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="orcEditor" style="display:none">
+      <div class="editor-barra">
+        <button class="btn ghost" onclick="fecharEditor()">← Voltar</button>
+        <span class="sep"></span>
+        <button class="btn ghost" onclick="exportarExcel()">Exportar Excel</button>
+        <button class="btn ghost" onclick="spGuardarExcel()" title="Carregar o Excel preenchido na pasta SharePoint do pedido">☁ Guardar no SharePoint</button>
+        <button class="btn primario" onclick="guardarOrcamento()">Guardar</button>
+      </div>
+
+      <div id="editorCabecalho">
+        <label class="c2">Código
+          <input type="text" id="hId" placeholder="ocWG26_120">
+        </label>
+        <label class="c2">Obra
+          <input type="text" id="hObra" placeholder="Nome da obra">
+        </label>
+        <label>Estado
+          <select id="hEstado">
+            <option>Rascunho</option><option>Em revisão</option><option>Enviado</option><option>Adjudicado</option><option>Perdido</option>
+          </select>
+        </label>
+        <label>Pedido (pipeline)
+          <input type="text" id="hPedido" placeholder="—" readonly style="background:var(--cal)">
+        </label>
+        <label class="c2">Cliente
+          <input type="text" id="hCliente">
+        </label>
+        <label class="c2">Email
+          <input type="email" id="hEmail">
+        </label>
+        <label class="c2">Localização
+          <input type="text" id="hLocal">
+        </label>
+        <label class="c6">Notas internas
+          <textarea id="hNotas" rows="1"></textarea>
+        </label>
+      </div>
+
+      <div class="pesquisa-wrap">
+        <input type="text" id="pesquisaPrecos" placeholder="Pesquisar artigo na tabela de preços…  (ex: acer, relva, mão de obra)" autocomplete="off">
+        <div id="resultadosPrecos"></div>
+      </div>
+
+      <div class="editor-barra">
+        <button class="btn ghost mini" onclick="adicionarLinha('capitulo')">+ Capítulo</button>
+        <button class="btn ghost mini" onclick="adicionarLinha('subcapitulo')">+ Subcapítulo</button>
+        <button class="btn ghost mini" onclick="adicionarLinha('artigo')">+ Linha manual</button>
+        <span class="sep"></span>
+        <button class="btn ghost mini" onclick="matchAutomatico()" title="Percorrer os artigos sem preço e sugerir correspondências da tabela, uma a uma">⚡ Match automático</button>
+        <button class="btn ghost mini" onclick="document.getElementById('importFile').click()" title="Importar mapa de quantidades do computador">⬆ Importar do computador</button>
+        <button class="btn ghost mini" onclick="spAbrir()" title="Abrir mapa de quantidades a partir do SharePoint">☁ Importar do SharePoint</button>
+        <input type="file" id="importFile" accept=".xlsx,.xls,.xlsm" style="display:none" onchange="importarExcel(this.files[0]); this.value=''">
+      </div>
+
+      <div class="tabela-wrap">
+        <table id="tabelaLinhas">
+          <thead><tr>
+            <th style="width:80px">Artigo</th><th>Descrição</th><th style="width:90px">Unidade</th><th style="width:100px" class="num">Qtd</th><th style="width:110px" class="num">Preço Un.</th><th style="width:120px" class="num">Total</th><th style="width:36px"></th>
+          </tr></thead>
+          <tbody id="linhasCorpo"></tbody>
+          <tfoot><tr>
+            <td colspan="5" style="text-align:right">Total</td>
+            <td class="col-total" id="totalGeral">0,00 €</td>
+            <td></td>
+          </tr></tfoot>
+        </table>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ================= HISTÓRICO ================= -->
+  <section class="painel" id="painel-historico">
+    <div class="painel-topo">
+      <div>
+        <h2>Histórico e follow-ups</h2>
+        <p>Orçamentos enviados, adjudicados e perdidos.</p>
+      </div>
+      <button class="btn primario" onclick="fuAbrir()">📅 Follow-ups <span id="fuBadge" class="fu-badge" style="display:none">0</span></button>
+    </div>
+    <div class="filtros">
+      <input type="text" id="histPesquisa" placeholder="Pesquisar código, obra, requerente…" oninput="renderHistorico()">
+      <select id="histFonte" onchange="renderHistorico()">
+        <option value="">Todas as fontes</option>
+        <option>Plataforma</option><option>2026</option><option>2025</option><option>2024</option>
+      </select>
+      <select id="histEstado" onchange="renderHistorico()">
+        <option value="">Enviados, adjudicados e perdidos</option>
+        <option>Enviado</option><option>Adjudicado</option><option>Perdido</option>
+      </select>
+      <select id="histResp" onchange="renderHistorico()">
+        <option value="">Todos os responsáveis</option>
+      </select>
+      <select id="histGrau" onchange="renderHistorico()">
+        <option value="">Todos os graus</option>
+        <option>Baixo</option><option>Médio</option><option>Alto</option><option>Muito Alto</option>
+      </select>
+    </div>
+    <div class="tabela-wrap">
+      <table>
+        <thead><tr>
+          <th class="ordenavel" onclick="histSort('codigo')">Código <span class="si">↕</span></th>
+          <th class="ordenavel" onclick="histSort('fonte')">Fonte <span class="si">↕</span></th>
+          <th class="ordenavel" onclick="histSort('obra')">Obra <span class="si">↕</span></th>
+          <th class="ordenavel num" onclick="histSort('total')">Total <span class="si">↕</span></th>
+          <th class="ordenavel" onclick="histSort('sortKey')">Enviado em <span class="si">↕</span></th>
+          <th class="ordenavel" onclick="histSort('_grau')" style="text-align:center">Interesse <span class="si">↕</span></th>
+          <th class="ordenavel" onclick="histSort('cliente')">Requerente <span class="si">↕</span></th>
+          <th class="ordenavel" onclick="histSort('responsavel')" style="text-align:center">Resp. <span class="si">↕</span></th>
+          <th class="ordenavel" onclick="histSort('estado')">Estado <span class="si">↕</span></th>
+          <th style="text-align:center">Nota</th>
+        </tr></thead>
+        <tbody id="histCorpo"><tr><td colspan="10" class="vazio">A carregar…</td></tr></tbody>
+      </table>
+    </div>
+    <p style="font-size:12px;color:var(--cinza);margin-top:8px">Clica numa linha para ver e editar — as alterações às fontes 2024–2026 são gravadas nas plataformas existentes através das suas APIs.</p>
+  </section>
+
+</main>
+
+<footer>Solução paralela e independente · as ferramentas existentes continuam intactas · histórico 2024–2026 em modo leitura</footer>
+
+<aside id="painelMatch" class="painel-match" hidden>
+  <div class="pm-topo">
+    <b>Tabela de preços — candidatos</b>
+    <button class="btn ghost mini" onclick="fecharMatching()">✕ Fechar</button>
+  </div>
+  <div class="pm-alvo" id="pmAlvo"></div>
+  <input type="text" id="pmPesquisa" placeholder="Afinar a pesquisa…" autocomplete="off" oninput="pmRecalcular()">
+  <div class="pm-lista" id="pmLista"></div>
+</aside>
+
+<div id="amOverlay" class="am-overlay">
+  <div class="am-caixa">
+    <div class="am-cab">
+      <b>⚡ Match automático</b>
+      <div class="am-prog"><div id="amProg"></div></div>
+      <div class="am-stats">
+        <span id="amPos">—</span>
+        <span>✓ <b id="amAplicados">0</b> aplicados</span>
+        <span>✗ <b id="amSaltados">0</b> saltados</span>
+        <span>∅ <b id="amSem">0</b> sem match</span>
+      </div>
+    </div>
+    <div class="am-corpo" id="amCorpo"></div>
+    <div class="am-acoes" id="amAcoes"></div>
+  </div>
+</div>
+
+<div id="spOverlay" class="am-overlay">
+  <div class="am-caixa" style="max-width:560px">
+    <div class="am-cab" style="display:flex;justify-content:space-between;align-items:center">
+      <b>☁ SharePoint</b>
+      <button class="btn ghost mini" onclick="spFechar()">✕ Fechar</button>
+    </div>
+    <div class="am-corpo" id="spCorpo"></div>
+  </div>
+</div>
+
+<div id="histOverlay" class="am-overlay">
+  <div class="am-caixa" style="max-width:640px">
+    <div class="am-cab" style="display:flex;justify-content:space-between;align-items:center">
+      <b id="histTitulo">Editar orçamento</b>
+      <button class="btn ghost mini" onclick="histFecharEdit()">✕ Fechar</button>
+    </div>
+    <div class="am-corpo" id="histCorpoEdit"></div>
+    <div class="am-acoes">
+      <button class="btn ghost" onclick="histFecharEdit()">Cancelar</button>
+      <button class="btn primario" onclick="histGuardar()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div id="fuOverlay" class="am-overlay">
+  <div class="am-caixa" style="max-width:680px">
+    <div class="am-cab" style="display:flex;justify-content:space-between;align-items:center">
+      <b>📅 Quadro de follow-ups</b>
+      <button class="btn ghost mini" onclick="fuFechar()">✕ Fechar</button>
+    </div>
+    <div class="am-corpo" id="fuCorpo"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/msal-browser/2.38.4/msal-browser.min.js"></script>
+<script>
+/* ============================================================
+   Configuração
+   ============================================================ */
+const NOVO = { // projecto Supabase desta plataforma (leitura + escrita)
+  url: 'https://kgpwpzluqnekqckltkys.supabase.co',
+  key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtncHdwemx1cW5la3Fja2x0a3lzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNTg1NzcsImV4cCI6MjA5NDkzNDU3N30.pno5YwPb1z2dphWX00eenX1t2aDCbrFO6l1Knk7uyhI'
+};
+const PIPELINE = { // pipeline existente — APENAS LEITURA, nunca escrever aqui
+  url: 'https://swouvxexiuiqeljnvprl.supabase.co',
+  key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN3b3V2eGV4aXVpcWVsam52cHJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxODkwMjYsImV4cCI6MjA5NDc2NTAyNn0.ChhwsF8hzmTNUADDFk8MDDbtSDZnvw0R87ZL5TQOYy8'
+};
+const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
+const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
+
+/* ============================================================
+   Estado global
+   ============================================================ */
+let precos = [];            // [{d, dn, u, p, c}]
+let precosInfo = null;      // {n, quando}
+let pedidos = [];
+let orcamentos = [];
+let atual = null;           // {header:{...}, linhas:[...]}
+
+/* ============================================================
+   Utilitários
+   ============================================================ */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const fmtEur = v => (Number(v) || 0).toLocaleString('pt-PT', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' €';
+const fmtData = d => { if(!d) return '—'; const x = new Date(d); return isNaN(x) ? '—' : x.toLocaleDateString('pt-PT'); };
+const numPT = v => { // aceita "1.234,56" e "1234.56"
+  if (typeof v === 'number') return v;
+  const s = String(v ?? '').trim().replace(/\s/g,'');
+  if (!s) return 0;
+  const n = parseFloat(s.includes(',') ? s.replace(/\./g,'').replace(',','.') : s);
+  return isNaN(n) ? 0 : n;
+};
+
+function toast(msg, tipo){
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'visivel' + (tipo === 'erro' ? ' erro' : '');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.className = '', 3500);
+}
+
+async function db(base, caminho, opts = {}){
+  const r = await fetch(base.url + '/rest/v1/' + caminho, {
+    ...opts,
+    headers: {
+      'apikey': base.key,
+      'Authorization': 'Bearer ' + base.key,
+      'Content-Type': 'application/json',
+      ...(opts.headers || {})
+    }
+  });
+  if (!r.ok) throw new Error('HTTP ' + r.status + ' — ' + (await r.text()).slice(0, 300));
+  const txt = await r.text();
+  return txt ? JSON.parse(txt) : null;
+}
+
+/* ============================================================
+   Navegação por separadores
+   ============================================================ */
+function mudarTab(nome){
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('ativa', b.dataset.tab === nome));
+  document.querySelectorAll('.painel').forEach(p => p.classList.toggle('ativa', p.id === 'painel-' + nome));
+}
+
+/* ============================================================
+   Tabela de preços — leitura ao vivo do SharePoint
+   ============================================================ */
+async function carregarPrecos(){
+  const chip = $('precosChip'), txt = $('precosTexto');
+  chip.className = ''; txt.textContent = 'Tabela de preços: a carregar…';
+  try {
+    const r = await fetch(FN_PRECOS, { headers: { 'apikey': NOVO.key, 'Authorization': 'Bearer ' + NOVO.key } });
+    const ct = r.headers.get('content-type') || '';
+    if (ct.includes('json')) {
+      const j = await r.json();
+      throw new Error(j.message || j.error || ('HTTP ' + r.status));
+    }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const ab = await r.arrayBuffer();
+    const wb = XLSX.read(ab, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+    // localizar a linha de cabeçalhos (contém "Artigo" e "Preço")
+    let hi = -1, ci = {};
+    for (let i = 0; i < Math.min(rows.length, 20); i++) {
+      const cells = (rows[i] || []).map(x => norm(x));
+      const iD = cells.findIndex(c => (c||'').includes('artigo') || (c||'').includes('descri'));
+      const iP = cells.findIndex(c => (c||'').includes('preco'));
+      if (iD > -1 && iP > -1) {
+        hi = i;
+        ci = {
+          d: iD, p: iP,
+          u: cells.findIndex(c => (c||'').includes('unid')),
+          c: cells.findIndex(c => (c||'') === 'codigo' || (c||'').startsWith('cod') || (c||'').includes('ref'))
+        };
+        break;
+      }
+    }
+    if (hi < 0) throw new Error('Não encontrei os cabeçalhos (Artigo / Preço) na primeira folha do ficheiro.');
+
+    precos = [];
+    for (let i = hi + 1; i < rows.length; i++) {
+      const r0 = rows[i]; if (!r0) continue;
+      const d = r0[ci.d];
+      if (d == null || String(d).trim() === '') continue;
+      const p = numPT(r0[ci.p]);
+      if (!(p > 0)) continue;
+      precos.push({
+        d: String(d).trim(),
+        dn: norm(d),
+        u: ci.u > -1 ? (r0[ci.u] ?? '') : '',
+        p,
+        c: ci.c > -1 ? String(r0[ci.c] ?? '') : ''
+      });
+    }
+    precosInfo = { n: precos.length, quando: new Date() };
+    IDF = null; precosTok = null;
+    chip.className = 'ok';
+    txt.textContent = precos.length.toLocaleString('pt-PT') + ' artigos · ' + precosInfo.quando.toLocaleTimeString('pt-PT', {hour:'2-digit',minute:'2-digit'});
+  } catch (e) {
+    chip.className = 'erro';
+    txt.textContent = 'Tabela de preços indisponível';
+    console.error(e);
+    toast('Tabela de preços: ' + e.message, 'erro');
+  }
+}
+
+/* pesquisa */
+let pesquisaTimer = null;
+$('pesquisaPrecos').addEventListener('input', () => {
+  clearTimeout(pesquisaTimer);
+  pesquisaTimer = setTimeout(renderResultados, 130);
+});
+document.addEventListener('click', e => {
+  if (!e.target.closest('.pesquisa-wrap')) $('resultadosPrecos').classList.remove('aberto');
+});
+$('pesquisaPrecos').addEventListener('focus', renderResultados);
+
+function renderResultados(){
+  const box = $('resultadosPrecos');
+  const q = norm($('pesquisaPrecos').value);
+  if (!q) { box.classList.remove('aberto'); return; }
+  if (!precos.length) {
+    box.innerHTML = '<div class="resultado-nota">Tabela de preços ainda não carregada — vê o estado no canto superior direito.</div>';
+    box.classList.add('aberto'); return;
+  }
+  const termos = q.split(/\s+/).filter(Boolean);
+  const res = [];
+  for (const a of precos) {
+    let ok = true;
+    for (const t of termos) if (!a.dn.includes(t) && !norm(a.c).includes(t)) { ok = false; break; }
+    if (ok) { res.push(a); if (res.length >= 60) break; }
+  }
+  box.innerHTML = res.length
+    ? res.map((a, i) => '<div class="resultado" data-i="' + i + '"><span class="desc">' + esc(a.d) + '</span><span class="un">' + esc(a.u) + '</span><span class="preco">' + fmtEur(a.p) + '</span></div>').join('')
+    : '<div class="resultado-nota">Sem resultados para «' + esc($('pesquisaPrecos').value) + '».</div>';
+  box._res = res;
+  box.classList.add('aberto');
+}
+$('resultadosPrecos').addEventListener('click', e => {
+  const div = e.target.closest('.resultado'); if (!div) return;
+  const a = $('resultadosPrecos')._res[+div.dataset.i];
+  if (!a || !atual) return;
+  atual.linhas.push({ tipo:'artigo', codigo:a.c || null, descricao:a.d, unidade:a.u || '', quantidade:1, preco_unitario:a.p });
+  renderLinhas();
+  toast('Artigo adicionado');
+});
+
+/* ============================================================
+   Pipeline (leitura)
+   ============================================================ */
+async function carregarPedidos(){
+  try {
+    pedidos = await db(PIPELINE, 'pedidos?select=id,ano,pedido,tipo,remetente,email,data,localizacao,estado,resp,codigo,sharepoint_url&order=data.desc.nullslast') || [];
+    pipEstados = [...new Set(pedidos.map(p => p.estado).filter(Boolean))].sort();
+    pipResps = [...new Set(pedidos.map(p => (p.resp || '').trim()).filter(Boolean))].sort();
+    $('pipEstado').innerHTML = '<option value="">Todos os estados</option>' + pipEstados.map(e => '<option>' + esc(e) + '</option>').join('');
+    renderPipeline();
+  } catch (e) {
+    $('pipCorpo').innerHTML = '<tr><td colspan="10" class="vazio">Não foi possível ler a pipeline — ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+let pipEstados = [], pipResps = [];
+
+function selEstadoPedido(p){
+  const ops = (p.estado && !pipEstados.includes(p.estado)) ? [p.estado, ...pipEstados] : pipEstados;
+  return '<select class="sel-mini" onchange="mudarEstadoPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\', this.value)">' +
+    ops.map(e => '<option' + (p.estado === e ? ' selected' : '') + '>' + esc(e) + '</option>').join('') +
+    '</select>';
+}
+
+function selRespPedido(p){
+  const atual = (p.resp || '').trim();
+  const lista = pipResps.slice();
+  if (atual && !lista.includes(atual)) lista.unshift(atual);
+  return '<select class="sel-mini" onchange="mudarRespPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\', this.value)">' +
+    '<option value=""' + (!atual ? ' selected' : '') + '>—</option>' +
+    lista.map(r => '<option' + (atual === r ? ' selected' : '') + '>' + esc(r) + '</option>').join('') +
+    '<option value="__outro">Outro…</option></select>';
+}
+
+async function mudarEstadoPedido(id, estado){
+  try {
+    await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(id), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify({ estado }) });
+    const p = pedidos.find(x => String(x.id) === String(id));
+    if (p) p.estado = estado;
+    toast('Estado actualizado na pipeline');
+  } catch (e) { toast('Erro ao actualizar estado: ' + e.message, 'erro'); renderPipeline(); }
+}
+
+async function mudarRespPedido(id, valor){
+  if (valor === '__outro') {
+    const v = prompt('Nome do responsável:');
+    if (v === null || !v.trim()) { renderPipeline(); return; }
+    valor = v.trim();
+  }
+  try {
+    await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(id), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify({ resp: valor }) });
+    const p = pedidos.find(x => String(x.id) === String(id));
+    if (p) p.resp = valor;
+    if (valor && !pipResps.includes(valor)) { pipResps.push(valor); pipResps.sort(); }
+    toast('Responsável actualizado na pipeline');
+    renderPipeline();
+  } catch (e) { toast('Erro ao actualizar responsável: ' + e.message, 'erro'); renderPipeline(); }
+}
+
+async function emailPedido(pid, win){
+  const p = pedidos.find(x => String(x.id) === String(pid));
+  if (!p) { if (win) win.close(); return; }
+  toast('A procurar o email…');
+  try {
+    const u = FN_EMAIL + '?email=' + encodeURIComponent(p.email || '') + '&data=' + encodeURIComponent(p.data || '') + '&assunto=' + encodeURIComponent(p.pedido || '');
+    const r = await fetch(u, { headers: { 'apikey': NOVO.key, 'Authorization': 'Bearer ' + NOVO.key } });
+    const j = await r.json();
+    if (!j.ok) { if (win) win.close(); toast(j.message || 'Não foi possível procurar o email.', 'erro'); return; }
+    if (!j.mensagens || !j.mensagens.length) { if (win) win.close(); toast('Email não encontrado na caixa orcamentos@ na janela de datas deste pedido.', 'erro'); return; }
+    const m = j.mensagens[0];
+    if (win) win.location = m.link; else window.open(m.link, '_blank');
+    toast('Aberto no Outlook: ' + (m.assunto || '') + (m.anexos ? ' 📎' : ''));
+  } catch (e) { if (win) win.close(); toast('Erro: ' + e.message, 'erro'); }
+}
+
+function chipPedido(estado){
+  const m = { 'Em análise':'ambar', 'Proposta enviada':'azul', 'Não iniciado':'cinza', 'Fora de Zona':'terra' };
+  return '<span class="chip ' + (m[estado] || 'cinza') + '">' + esc(estado || '—') + '</span>';
+}
+
+function renderPipeline(){
+  const q = norm($('pipPesquisa').value);
+  const fe = $('pipEstado').value;
+  const lista = pedidos.filter(p => {
+    if (fe && p.estado !== fe) return false;
+    if (!q) return true;
+    return norm([p.pedido, p.remetente, p.localizacao, p.codigo, p.tipo].join(' ')).includes(q);
+  });
+  $('pipCorpo').innerHTML = lista.length ? lista.map(p =>
+    '<tr>' +
+    '<td>' + fmtData(p.data) + '</td>' +
+    '<td>' + esc(p.codigo || '—') + '</td>' +
+    '<td>' + esc(p.pedido || '—') + '</td>' +
+    '<td>' + esc(p.remetente || '—') + '</td>' +
+    '<td>' + esc(p.localizacao || '—') + '</td>' +
+    '<td>' + esc(p.tipo || '—') + '</td>' +
+    '<td>' + selEstadoPedido(p) + '</td>' +
+    '<td>' + selRespPedido(p) + '</td>' +
+    '<td style="text-align:center;white-space:nowrap">' +
+      (p.sharepoint_url ? '<a href="' + esc(p.sharepoint_url) + '" target="_blank" rel="noopener" title="Pasta no SharePoint" style="text-decoration:none">📁</a> ' : '') +
+      '<a href="#" onclick="emailPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\', window.open(\'\',\'_blank\')); return false" title="Abrir o email original no Outlook" style="text-decoration:none">✉️</a>' +
+    '</td>' +
+    '<td><button class="btn ghost mini" onclick="orcamentarPedido(\'' + esc(p.id).replace(/'/g, "\\'") + '\')">Orçamentar →</button></td>' +
+    '</tr>'
+  ).join('') : '<tr><td colspan="10" class="vazio">Nenhum pedido corresponde aos filtros.</td></tr>';
+}
+
+function orcamentarPedido(pid){
+  const p = pedidos.find(x => String(x.id) === String(pid));
+  if (!p) return;
+  // se já existe um orçamento com este código, abre-o
+  if (p.codigo) {
+    const existente = orcamentos.find(o => o.id === p.codigo);
+    if (existente) { mudarTab('orcamentacao'); abrirOrcamento(existente.id); toast('Já existia um orçamento com este código — aberto.'); return; }
+  }
+  atual = {
+    novo: true,
+    header: {
+      id: p.codigo || '',
+      pedido_id: p.codigo || String(p.id),
+      nome_obra: p.pedido || '',
+      cliente: p.remetente || '',
+      email_cliente: p.email || '',
+      localizacao: p.localizacao || '',
+      estado: 'Rascunho',
+      notas: '',
+      data_envio: null
+    },
+    linhas: []
+  };
+  mudarTab('orcamentacao');
+  abrirEditor();
+}
+
+/* ============================================================
+   Orçamentos — lista
+   ============================================================ */
+async function carregarOrcamentos(){
+  try {
+    orcamentos = await db(NOVO, 'orcamentos_v2?select=*&order=atualizado_em.desc') || [];
+    renderOrcamentos();
+    renderHistorico();
+  } catch (e) {
+    $('orcCorpo').innerHTML = '<tr><td colspan="7" class="vazio">Erro ao carregar — ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function chipOrc(estado){
+  const m = { 'Rascunho':'cinza', 'Em revisão':'ambar', 'Enviado':'azul', 'Adjudicado':'verde-solido', 'Perdido':'erro' };
+  return '<span class="chip ' + (m[estado] || 'cinza') + '">' + esc(estado || '—') + '</span>';
+}
+
+function renderOrcamentos(){
+  $('orcCorpo').innerHTML = orcamentos.length ? orcamentos.map(o =>
+    '<tr class="clicavel" onclick="abrirOrcamento(\'' + esc(o.id).replace(/'/g, "\\'") + '\')">' +
+    '<td><b>' + esc(o.id) + '</b></td>' +
+    '<td>' + esc(o.nome_obra || '—') + '</td>' +
+    '<td>' + esc(o.cliente || '—') + '</td>' +
+    '<td>' + chipOrc(o.estado) + '</td>' +
+    '<td class="num">' + fmtEur(o.total) + '</td>' +
+    '<td>' + fmtData(o.atualizado_em) + '</td>' +
+    '<td onclick="event.stopPropagation()"><button class="btn perigo" title="Apagar" onclick="apagarOrcamento(\'' + esc(o.id).replace(/'/g, "\\'") + '\')">✕</button></td>' +
+    '</tr>'
+  ).join('') : '<tr><td colspan="7" class="vazio">Ainda sem orçamentos. Cria o primeiro ou começa a partir de um pedido na Pipeline.</td></tr>';
+}
+
+async function apagarOrcamento(id){
+  if (!confirm('Apagar o orçamento ' + id + ' e todas as suas linhas?')) return;
+  try {
+    await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(id), { method: 'DELETE' });
+    toast('Orçamento apagado');
+    carregarOrcamentos();
+  } catch (e) { toast('Erro ao apagar: ' + e.message, 'erro'); }
+}
+
+function novoOrcamento(){
+  atual = {
+    novo: true,
+    header: { id:'', pedido_id:null, nome_obra:'', cliente:'', email_cliente:'', localizacao:'', estado:'Rascunho', notas:'', data_envio:null },
+    linhas: []
+  };
+  abrirEditor();
+}
+
+async function abrirOrcamento(id){
+  try {
+    const hs = await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(id) + '&select=*');
+    if (!hs || !hs.length) { toast('Orçamento não encontrado', 'erro'); return; }
+    const ls = await db(NOVO, 'orcamentos_v2_linhas?orcamento_id=eq.' + encodeURIComponent(id) + '&select=*&order=ordem.asc') || [];
+    atual = {
+      novo: false,
+      header: hs[0],
+      linhas: ls.map(l => ({ tipo: l.tipo || 'artigo', codigo: l.codigo_artigo, descricao: l.descricao, unidade: l.unidade || '', quantidade: Number(l.quantidade) || 0, preco_unitario: Number(l.preco_unitario) || 0 }))
+    };
+    abrirEditor();
+  } catch (e) { toast('Erro ao abrir: ' + e.message, 'erro'); }
+}
+
+/* ============================================================
+   Editor
+   ============================================================ */
+function abrirEditor(){
+  $('orcLista').style.display = 'none';
+  $('orcEditor').style.display = 'block';
+  const h = atual.header;
+  $('hId').value = h.id || '';
+  $('hId').readOnly = !atual.novo;
+  $('hId').style.background = atual.novo ? '' : 'var(--cal)';
+  $('hObra').value = h.nome_obra || '';
+  $('hEstado').value = h.estado || 'Rascunho';
+  $('hPedido').value = h.pedido_id || '—';
+  $('hCliente').value = h.cliente || '';
+  $('hEmail').value = h.email_cliente || '';
+  $('hLocal').value = h.localizacao || '';
+  $('hNotas').value = h.notas || '';
+  $('pesquisaPrecos').value = '';
+  renderLinhas();
+}
+
+function fecharEditor(){
+  atual = null;
+  $('orcEditor').style.display = 'none';
+  $('orcLista').style.display = 'block';
+}
+
+function lerCabecalho(){
+  const h = atual.header;
+  h.id = $('hId').value.trim();
+  h.nome_obra = $('hObra').value.trim();
+  h.estado = $('hEstado').value;
+  h.cliente = $('hCliente').value.trim();
+  h.email_cliente = $('hEmail').value.trim();
+  h.localizacao = $('hLocal').value.trim();
+  h.notas = $('hNotas').value.trim();
+}
+
+function numerarLinhas(){
+  let c = 0, s = 0, a = 0;
+  for (const l of atual.linhas) {
+    if (l.tipo === 'capitulo') { c++; s = 0; a = 0; l.num = String(c); }
+    else if (l.tipo === 'subcapitulo') { if (c === 0) c = 1; s++; a = 0; l.num = c + '.' + s; }
+    else { a++; l.num = s > 0 ? c + '.' + s + '.' + a : (c > 0 ? c + '.' + a : String(a)); }
+  }
+}
+
+function adicionarLinha(tipo){
+  if (!atual) return;
+  if (tipo === 'artigo') atual.linhas.push({ tipo, codigo:null, descricao:'', unidade:'', quantidade:1, preco_unitario:0 });
+  else atual.linhas.push({ tipo, codigo:null, descricao:'', unidade:'', quantidade:0, preco_unitario:0 });
+  renderLinhas();
+}
+
+function renderLinhas(){
+  numerarLinhas();
+  const corpo = $('linhasCorpo');
+  corpo.innerHTML = atual.linhas.map((l, i) => {
+    if (l.tipo !== 'artigo') {
+      return '<tr class="' + l.tipo + '">' +
+        '<td class="col-num">' + l.num + '</td>' +
+        '<td colspan="4"><input data-i="' + i + '" data-f="descricao" value="' + esc(l.descricao) + '" placeholder="' + (l.tipo === 'capitulo' ? 'Nome do capítulo' : 'Nome do subcapítulo') + '"></td>' +
+        '<td class="col-total"></td>' +
+        '<td class="col-acao"><button class="btn perigo" onclick="removerLinha(' + i + ')">✕</button></td>' +
+        '</tr>';
+    }
+    return '<tr>' +
+      '<td class="col-num clicavel" onclick="abrirMatching(' + i + ')" title="Procurar na tabela de preços">' + l.num + '</td>' +
+      '<td><input data-i="' + i + '" data-f="descricao" value="' + esc(l.descricao) + '" placeholder="Descrição"></td>' +
+      '<td><input data-i="' + i + '" data-f="unidade" value="' + esc(l.unidade) + '" placeholder="un"></td>' +
+      '<td><input class="num" data-i="' + i + '" data-f="quantidade" value="' + (l.quantidade ?? '') + '"></td>' +
+      '<td><input class="num" data-i="' + i + '" data-f="preco_unitario" value="' + (l.preco_unitario ?? '') + '"></td>' +
+      '<td class="col-total" id="lt' + i + '">' + fmtEur((l.quantidade || 0) * (l.preco_unitario || 0)) + '</td>' +
+      '<td class="col-acao"><button class="btn-ico" onclick="abrirMatching(' + i + ')" title="Procurar na tabela de preços">🔎</button><button class="btn perigo" onclick="removerLinha(' + i + ')">✕</button></td>' +
+      '</tr>';
+  }).join('');
+  atualizarTotal();
+  if (pmIdx > -1) marcarLinhaAtiva();
+}
+
+$('linhasCorpo').addEventListener('input', e => {
+  const inp = e.target.closest('input'); if (!inp) return;
+  const i = +inp.dataset.i, f = inp.dataset.f;
+  const l = atual.linhas[i]; if (!l) return;
+  if (f === 'quantidade' || f === 'preco_unitario') {
+    l[f] = numPT(inp.value);
+    const cel = $('lt' + i);
+    if (cel) cel.textContent = fmtEur((l.quantidade || 0) * (l.preco_unitario || 0));
+    atualizarTotal();
+  } else {
+    l[f] = inp.value;
+  }
+});
+
+function removerLinha(i){
+  atual.linhas.splice(i, 1);
+  if (pmIdx === i) fecharMatching();
+  else if (pmIdx > i) pmIdx--;
+  renderLinhas();
+}
+
+/* ============================================================
+   Painel de matching com a tabela de preços
+   ============================================================ */
+let pmIdx = -1, pmTimer = null;
+
+function abrirMatching(i){
+  const l = atual && atual.linhas[i];
+  if (!l || l.tipo !== 'artigo') return;
+  pmIdx = i;
+  $('pmAlvo').innerHTML = '<b>' + esc(l.num || '') + '</b> ' + esc(l.descricao || '(sem descrição)');
+  $('pmPesquisa').value = l.descricao || '';
+  $('painelMatch').hidden = false;
+  marcarLinhaAtiva();
+  pmRecalcular();
+}
+
+function fecharMatching(){
+  pmIdx = -1;
+  $('painelMatch').hidden = true;
+  marcarLinhaAtiva();
+}
+
+function marcarLinhaAtiva(){
+  document.querySelectorAll('#linhasCorpo tr').forEach((tr, i) => tr.classList.toggle('linha-ativa', i === pmIdx));
+}
+
+/* ============================================================
+   Motor de pesquisa na tabela (IDF, portado da ferramenta antiga)
+   ============================================================ */
+const STOP_PT = new Set(['fornecimento','execucao','instalacao','aplicacao','incluindo',
+  'trabalhos','materiais','necessarios','complementares','todos','conforme','tudo',
+  'para','com','sem','sobre','por','em','um','uma','ou','de','da','do','das','dos',
+  'na','no','nas','nos','e','a','o','as','os','que','se','ao','ate','como','mais',
+  'num','numa','tipo','ser','deve','forma','cada','entre','apos','sua','seu']);
+
+function kwSP(s){ return norm(s).split(/\s+/).filter(w => w.length > 2 && !STOP_PT.has(w)); }
+
+let IDF = null, precosTok = null;
+function prepararIndice(){
+  if (IDF || !precos.length) return;
+  precosTok = precos.map(a => kwSP(a.d));
+  const df = {};
+  const N = precos.length;
+  for (const ts of precosTok) for (const w of new Set(ts)) df[w] = (df[w] || 0) + 1;
+  IDF = {};
+  for (const w in df) IDF[w] = Math.log((N + 1) / (df[w] + 1));
+}
+
+function searchPrecos(query, topN){
+  prepararIndice();
+  if (!IDF) return [];
+  const qk = kwSP(query);
+  if (!qk.length) return [];
+  const NlogN = Math.log(precos.length + 1);
+  const qPairs = qk.map(w => [w, IDF[w] || NlogN]);
+  const qByIdf = [...qPairs].sort((a, b) => b[1] - a[1]);
+  const keyTokens = qByIdf.slice(0, Math.min(qByIdf.length, 6));
+  const keyTotal = keyTokens.reduce((s, p) => s + p[1], 0);
+  const fullTotal = qPairs.reduce((s, p) => s + p[1], 0);
+  if (!keyTotal && !fullTotal) return [];
+  const qSet = new Set(qk);
+  const out = [];
+  for (let j = 0; j < precos.length; j++) {
+    const ts = precosTok[j];
+    if (!ts.length) continue;
+    const set = new Set(ts);
+    let keyM = 0; for (const p of keyTokens) if (set.has(p[0])) keyM += p[1];
+    const keyScore = keyTotal ? keyM / keyTotal : 0;
+    let fullM = 0; for (const p of qPairs) if (set.has(p[0])) fullM += p[1];
+    const fullScore = fullTotal ? fullM / fullTotal : 0;
+    let cov = 0; for (const t of ts) if (qSet.has(t)) cov++;
+    let big = 0;
+    for (let i = 0; i < qk.length - 1; i++) if (set.has(qk[i]) && set.has(qk[i + 1])) big++;
+    let score = Math.max(keyScore, fullScore) * 0.7 + (cov / ts.length) * 0.2 + Math.min(big * 0.10, 0.25);
+    if (score > 1) score = 1;
+    if (score > 0.12) out.push([score, j]);
+  }
+  out.sort((a, b) => b[0] - a[0]);
+  return out.slice(0, topN);
+}
+
+function pmRecalcular(){
+  clearTimeout(pmTimer);
+  pmTimer = setTimeout(() => {
+    if (!precos.length) { $('pmLista').innerHTML = '<div style="padding:16px;color:var(--cinza)">A tabela de preços ainda não carregou — vê o estado no topo.</div>'; return; }
+    const res = searchPrecos($('pmPesquisa').value, 40);
+    $('pmLista').innerHTML = res.length ? res.map(r => {
+      const a = precos[r[1]];
+      const pct = Math.round(r[0] * 100);
+      const cls = pct >= 80 ? 'alto' : (pct >= 50 ? 'medio' : 'baixo');
+      return '<div class="pm-item" onclick="aplicarMatch(' + r[1] + ')">' +
+        '<span class="pm-badge ' + cls + '">' + pct + '%</span>' +
+        '<span class="pm-desc">' + esc(a.d) + '<div class="pm-meta">' + esc(a.u || '—') + (a.c ? ' · ' + esc(a.c) : '') + '</div></span>' +
+        '<span class="pm-preco">' + fmtEur(a.p) + '</span>' +
+        '</div>';
+    }).join('') : '<div style="padding:16px;color:var(--cinza)">Nada encontrado — tenta menos palavras ou sinónimos.</div>';
+  }, 120);
+}
+
+function aplicarMatch(j){
+  const a = precos[j];
+  const l = atual && atual.linhas[pmIdx];
+  if (!a || !l) return;
+  l.preco_unitario = a.p;
+  if (!l.unidade) l.unidade = a.u || '';
+  l.codigo = a.c || null;
+  renderLinhas();
+  toast('Aplicado: ' + fmtEur(a.p) + (a.u ? ' / ' + a.u : ''));
+  const depois = atual.linhas.findIndex((x, k) => k > pmIdx && x.tipo === 'artigo' && !(x.preco_unitario > 0));
+  const prox = depois > -1 ? depois : atual.linhas.findIndex(x => x.tipo === 'artigo' && !(x.preco_unitario > 0));
+  if (prox > -1) abrirMatching(prox);
+  else fecharMatching();
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('painelMatch').hidden) fecharMatching(); });
+
+/* ============================================================
+   Assistente de match automático (cartão a cartão)
+   ============================================================ */
+let AM = null;
+
+function matchAutomatico(){
+  if (!atual) return;
+  if (!precos.length) { toast('A tabela de preços ainda não carregou — vê o estado no topo.', 'erro'); return; }
+  const fila = [];
+  atual.linhas.forEach((l, i) => {
+    if (l.tipo === 'artigo' && !(l.preco_unitario > 0) && (l.descricao || '').trim()) fila.push(i);
+  });
+  if (!fila.length) { toast('Todos os artigos já têm preço — nada a fazer.'); return; }
+  fecharMatching();
+  AM = { fila, total: fila.length, pos: 0, aplicados: 0, saltados: 0, sem: 0, actual: null, limiar: 0.70 };
+  amAcoesNormais();
+  $('amOverlay').classList.add('aberto');
+  document.addEventListener('keydown', amTeclas);
+  amProximo();
+}
+
+function amAcoesNormais(){
+  $('amAcoes').innerHTML =
+    '<button class="btn ghost" onclick="amParar()">⏹ Parar (Esc)</button>' +
+    '<button class="btn ghost" onclick="amSaltar()">✗ Saltar (N)</button>' +
+    '<button class="btn primario" onclick="amAplicar()">✓ Aplicar (Y/Enter)</button>';
+}
+
+function amTeclas(e){
+  if (!AM) return;
+  if (e.key === 'Escape') { e.preventDefault(); amParar(); }
+  else if ((e.key === 'Enter' || e.key === 'y' || e.key === 'Y') && AM.actual) { e.preventDefault(); amAplicar(); }
+  else if ((e.key === 'n' || e.key === 'N') && AM.actual) { e.preventDefault(); amSaltar(); }
+}
+
+function amProximo(){
+  const st = AM; if (!st) return;
+  $('amProg').style.width = (st.total ? (st.pos / st.total) * 100 : 0) + '%';
+  $('amPos').textContent = 'Artigo ' + Math.min(st.pos + 1, st.total) + ' de ' + st.total;
+  $('amAplicados').textContent = st.aplicados;
+  $('amSaltados').textContent = st.saltados;
+  $('amSem').textContent = st.sem;
+  if (st.pos >= st.fila.length) { amResumo(false); return; }
+  const i = st.fila[st.pos];
+  const l = atual.linhas[i];
+  const res = searchPrecos(l.descricao || '', 1);
+  const top = res[0];
+  if (!top || top[0] < st.limiar) { st.sem++; st.pos++; setTimeout(amProximo, 0); return; }
+  st.actual = { i, j: top[1] };
+  const a = precos[top[1]];
+  const pct = Math.round(top[0] * 100);
+  $('amCorpo').innerHTML =
+    '<div class="am-sec">Artigo do orçamento</div>' +
+    '<div class="am-cartao">' +
+      '<div class="am-desc">' + (l.num ? '<b>' + esc(l.num) + '</b> ' : '') + esc(l.descricao) + '</div>' +
+      '<div class="am-meta">' + (l.unidade ? '<span>Un: <b>' + esc(l.unidade) + '</b></span>' : '') + (l.quantidade ? '<span>Quant: <b>' + l.quantidade + '</b></span>' : '') + '</div>' +
+    '</div>' +
+    '<div class="am-sec">Melhor correspondência na tabela</div>' +
+    '<div class="am-cartao match">' +
+      '<div class="am-linha-match"><div class="am-desc">' + esc(a.d) + '</div>' +
+      '<span class="am-pct ' + (pct >= 80 ? 'alto' : 'medio') + '">' + pct + '%</span></div>' +
+      '<div class="am-meta"><span>' + esc(a.u || '—') + (a.c ? ' · ' + esc(a.c) : '') + '</span><span><b>' + fmtEur(a.p) + '</b></span></div>' +
+    '</div>' +
+    '<div class="am-teclas">Atalhos: <b>Y/Enter</b> aplicar · <b>N</b> saltar · <b>Esc</b> parar</div>';
+}
+
+function amAplicar(){
+  const st = AM; if (!st || !st.actual) return;
+  const l = atual.linhas[st.actual.i];
+  const a = precos[st.actual.j];
+  if (l && a) { l.preco_unitario = a.p; if (!l.unidade) l.unidade = a.u || ''; l.codigo = a.c || null; }
+  st.aplicados++; st.actual = null; st.pos++;
+  amProximo();
+}
+
+function amSaltar(){
+  const st = AM; if (!st) return;
+  st.saltados++; st.actual = null; st.pos++;
+  amProximo();
+}
+
+function amParar(){
+  if (!AM) return;
+  if (AM.aplicados || AM.saltados || AM.sem) amResumo(true);
+  else amFechar();
+}
+
+function amResumo(parado){
+  const st = AM; if (!st) return;
+  st.actual = null;
+  $('amProg').style.width = '100%';
+  $('amPos').textContent = parado ? 'Parado' : 'Concluído';
+  $('amCorpo').innerHTML =
+    '<div class="am-resumo">' +
+      '<div style="font-size:34px">' + (parado ? '⏹' : '🎉') + '</div>' +
+      '<div style="font-weight:700;margin-top:6px">' + (parado ? 'Match automático parado' : 'Match automático concluído') + '</div>' +
+      '<div class="nums">' +
+        '<div><b style="color:#2e6b2a">' + st.aplicados + '</b>Aplicados</div>' +
+        '<div><b>' + st.saltados + '</b>Saltados</div>' +
+        '<div><b style="color:var(--cinza)">' + st.sem + '</b>Sem match ≥70%</div>' +
+      '</div>' +
+      '<div style="font-size:12px;color:var(--cinza);margin-top:12px">Os saltados e sem match continuam sem preço — clica no nº da linha para os resolver a partir da tabela.</div>' +
+    '</div>';
+  $('amAcoes').innerHTML = '<button class="btn primario" onclick="amFechar()">Fechar</button>';
+}
+
+function amFechar(){
+  document.removeEventListener('keydown', amTeclas);
+  $('amOverlay').classList.remove('aberto');
+  AM = null;
+  renderLinhas();
+}
+
+/* ============================================================
+   SharePoint — sessão Microsoft (login delegado) + navegação
+   completa por sites e pastas + importar/guardar via Graph
+   ============================================================ */
+const AZ = {
+  clientId: '01764d4c-4cb8-4433-b326-79d3b97168f7',
+  tenant: '3ef27ff6-10f7-4057-a88e-4755e9a86382',
+  scopes: ['User.Read', 'Sites.ReadWrite.All']
+};
+let msalApp = null, spConta = null;
+let spModo = 'importar';           // 'importar' | 'guardar'
+let spPilha = [];                  // navegação: {tipo:'inicio'|'sites'|'drives'|'pasta', ...}
+
+function spMsal(){
+  if (!msalApp) {
+    msalApp = new msal.PublicClientApplication({
+      auth: {
+        clientId: AZ.clientId,
+        authority: 'https://login.microsoftonline.com/' + AZ.tenant,
+        redirectUri: window.location.origin + window.location.pathname
+      },
+      cache: { cacheLocation: 'localStorage' }
+    });
+    const contas = msalApp.getAllAccounts();
+    if (contas.length) spConta = contas[0];
+  }
+  return msalApp;
+}
+
+async function spLogin(){
+  try {
+    const res = await spMsal().loginPopup({ scopes: AZ.scopes, prompt: 'select_account' });
+    spConta = res.account;
+    toast('Sessão iniciada: ' + (spConta.name || spConta.username));
+    spInicio();
+  } catch (e) {
+    const txt = String(e.errorMessage || e.message || e);
+    if (txt.includes('user_cancelled') || txt.includes('user_cancelled')) return;
+    let ajuda = txt;
+    if (/redirect_uri|reply.*url|AADSTS50011/i.test(txt)) {
+      ajuda = 'O endereço desta página ainda não está autorizado no registo Azure.\n\nNo portal.azure.com → App registrations → (a app) → Authentication → adiciona uma plataforma «Single-page application» com o URI:\n' + window.location.origin + window.location.pathname;
+    } else if (/consent|AADSTS65001|admin/i.test(txt)) {
+      ajuda = 'Falta consentimento para o acesso ao SharePoint. Um administrador precisa de autorizar a permissão Sites.ReadWrite.All (delegada) no registo Azure.';
+    }
+    spErro(ajuda);
+  }
+}
+
+async function spLogout(){
+  try { await spMsal().logoutPopup({ account: spConta }); } catch (_) { /* ok */ }
+  spConta = null;
+  spVistaLogin();
+}
+
+async function spToken(){
+  spMsal();
+  if (!spConta) throw new Error('sem sessão');
+  try {
+    return (await msalApp.acquireTokenSilent({ scopes: AZ.scopes, account: spConta })).accessToken;
+  } catch (_) {
+    const r = await msalApp.acquireTokenPopup({ scopes: AZ.scopes, account: spConta });
+    spConta = r.account;
+    return r.accessToken;
+  }
+}
+
+async function gFetch(caminho, opts){
+  const tok = await spToken();
+  const o = opts || {};
+  o.headers = { ...(o.headers || {}), Authorization: 'Bearer ' + tok };
+  const r = await fetch(caminho.startsWith('http') ? caminho : 'https://graph.microsoft.com/v1.0' + caminho, o);
+  if (!r.ok) {
+    let m = 'Graph HTTP ' + r.status;
+    try { m = (await r.json()).error?.message || m; } catch (_) { /* binário */ }
+    throw new Error(m);
+  }
+  return r;
+}
+async function gJson(caminho){ return (await gFetch(caminho)).json(); }
+
+function pastaDoPedido(){
+  if (!atual || !atual.pedido_id) return null;
+  const p = pedidos.find(x => String(x.id) === String(atual.pedido_id));
+  return p && p.sharepoint_url ? p.sharepoint_url : null;
+}
+
+function shareIdDe(url){
+  return 'u!' + btoa(url).replace(/=+$/g, '').replace(/\//g, '_').replace(/\+/g, '-');
+}
+
+async function gResolverUrl(rawUrl){
+  let url = String(rawUrl || '').trim().split(/[?#]/)[0].replace(/\/+$/, '');
+  try { url = decodeURIComponent(url); } catch (_) { /* já está */ }
+  // 1) shares API (funciona bem com token delegado)
+  try {
+    return await gJson('/shares/' + shareIdDe(rawUrl.trim()) + '/driveItem?$select=id,name,size,file,folder,parentReference,webUrl');
+  } catch (_) { /* tentar por caminho */ }
+  // 2) por caminho: site → drives → root:/path
+  const m = url.match(/^https:\/\/([^\/]+)\/sites\/([^\/]+)(?:\/(.*))?$/);
+  if (!m) throw new Error('não reconheço este link SharePoint');
+  const sj = await gJson('/sites/' + m[1] + ':/sites/' + m[2]);
+  const drives = (await gJson('/sites/' + sj.id + '/drives?$select=id,name,webUrl')).value || [];
+  let melhor = null;
+  for (const d of drives) {
+    let w = String(d.webUrl || '');
+    try { w = decodeURIComponent(w); } catch (_) { /* ok */ }
+    w = w.replace(/\/+$/, '');
+    if (url === w || url.startsWith(w + '/')) {
+      if (!melhor || w.length > melhor.w.length) melhor = { id: d.id, w };
+    }
+  }
+  if (!melhor) throw new Error('não encontrei a biblioteca deste link');
+  const rel = url === melhor.w ? '' : url.slice(melhor.w.length + 1);
+  const item = await gJson('/drives/' + melhor.id + (rel ? '/root:/' + rel.split('/').map(encodeURIComponent).join('/') : '/root') + '?$select=id,name,size,file,folder,parentReference,webUrl');
+  item.parentReference = item.parentReference || {};
+  if (!item.parentReference.driveId) item.parentReference.driveId = melhor.id;
+  return item;
+}
+
+/* ---------- UI do modal ---------- */
+function spAbrir(){ spAbrirModo('importar'); }
+async function spGuardarExcel(){ spAbrirModo('guardar'); }
+
+function spAbrirModo(modo){
+  if (!atual) return;
+  spModo = modo;
+  $('spOverlay').classList.add('aberto');
+  spMsal();
+  if (!spConta) spVistaLogin();
+  else spInicio();
+}
+function spFechar(){ $('spOverlay').classList.remove('aberto'); }
+
+function spTopo(extra){
+  const sessao = spConta
+    ? '<span style="font-size:12px;color:var(--cinza)">Ligado como <b>' + esc(spConta.name || spConta.username) + '</b> · <a href="#" onclick="spLogout();return false">sair</a></span>'
+    : '';
+  const modoLbl = spModo === 'guardar'
+    ? '<span class="chip verde">A escolher onde guardar</span>'
+    : '<span class="chip cinza">A escolher o ficheiro a importar</span>';
+  return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">' + modoLbl + sessao + '</div>' + (extra || '');
+}
+
+function spVistaLogin(){
+  $('spCorpo').innerHTML = spTopo(
+    '<div style="text-align:center;padding:18px 8px">' +
+      '<div style="font-size:32px">🔐</div>' +
+      '<div style="font-weight:600;margin:8px 0 4px">Liga a tua conta Microsoft</div>' +
+      '<div style="font-size:12.5px;color:var(--cinza);margin-bottom:14px">Acede às pastas do SharePoint com as tuas permissões.<br>Só precisas de autorizar uma vez — a sessão fica guardada.</div>' +
+      '<button class="btn primario" onclick="spLogin()">Ligar conta Microsoft</button>' +
+    '</div>'
+  );
+}
+
+function spCarregando(t){ $('spCorpo').innerHTML = spTopo('<div style="padding:20px;color:var(--cinza)">' + esc(t) + '</div>'); }
+function spErro(t){
+  $('spCorpo').innerHTML = spTopo(
+    '<div style="padding:14px;color:#a33;font-size:13px;white-space:pre-wrap;line-height:1.45">' + esc(t || 'Erro') + '</div>' +
+    '<div style="padding:0 14px 10px"><button class="btn ghost mini" onclick="spInicio()">← Início</button></div>'
+  );
+}
+
+/* Início: atalhos */
+async function spInicio(){
+  spPilha = [];
+  const temPasta = !!pastaDoPedido();
+  $('spCorpo').innerHTML = spTopo(
+    (temPasta ? '<div class="pm-item" onclick="spIrPastaPedido()"><span>📌</span><span class="pm-desc"><b>Pasta do pedido</b><div class="pm-meta">' + esc(pastaDoPedido()) + '</div></span></div>' : '') +
+    '<div class="pm-item" onclick="spVistaSites()"><span>🏢</span><span class="pm-desc"><b>Sites SharePoint</b><div class="pm-meta">Navegar por todos os sites e bibliotecas</div></span></div>' +
+    '<div class="pm-item" onclick="spVistaLink()"><span>🔗</span><span class="pm-desc"><b>Colar um link</b><div class="pm-meta">Pasta ou ficheiro partilhado</div></span></div>'
+  );
+}
+
+async function spIrPastaPedido(){
+  spCarregando('A abrir a pasta do pedido…');
+  try {
+    const item = await gResolverUrl(pastaDoPedido());
+    if (!item.folder) throw new Error('o link do pedido não aponta para uma pasta');
+    spPilha = [];
+    await spVistaPasta(item.parentReference.driveId, item.id, item.name, true);
+  } catch (e) { spErro(e.message); }
+}
+
+function spVistaLink(){
+  $('spCorpo').innerHTML = spTopo(
+    '<div style="font-size:13px;color:var(--cinza);margin-bottom:10px">Cola um link SharePoint (pasta ou ficheiro):</div>' +
+    '<div style="display:flex;gap:8px"><input type="text" id="spLink" placeholder="https://wegarden.sharepoint.com/…" style="flex:1;padding:8px 10px;border:1px solid #ccc;border-radius:8px">' +
+    '<button class="btn primario" onclick="spResolverLink()">Abrir</button></div>' +
+    '<div style="margin-top:10px"><button class="btn ghost mini" onclick="spInicio()">← Início</button></div>'
+  );
+}
+
+async function spResolverLink(){
+  const v = ($('spLink') && $('spLink').value || '').trim();
+  if (!v) return;
+  spCarregando('A abrir o link…');
+  try {
+    const item = await gResolverUrl(v);
+    if (item.folder) { spPilha = []; await spVistaPasta(item.parentReference.driveId, item.id, item.name, true); }
+    else if (spModo === 'importar') await spImportarFicheiro(item.parentReference.driveId, item.id, item.name);
+    else spErro('Esse link é um ficheiro — para guardar, escolhe uma pasta.');
+  } catch (e) { spErro(e.message); }
+}
+
+/* Sites e bibliotecas */
+async function spVistaSites(){
+  spCarregando('A procurar os sites…');
+  try {
+    const j = await gJson('/sites?search=*&$select=id,displayName,webUrl');
+    const sites = (j.value || []).sort((a, b) => String(a.displayName).localeCompare(String(b.displayName), 'pt'));
+    spPilha = [{ tipo: 'sites' }];
+    $('spCorpo').innerHTML = spTopo(
+      spNavBarra('Sites SharePoint') +
+      (sites.length ? sites.map(s =>
+        '<div class="pm-item" onclick="spVistaDrives(\'' + s.id + '\',\'' + esc(s.displayName).replace(/'/g, "\\'") + '\')"><span>🏢</span><span class="pm-desc">' + esc(s.displayName || s.webUrl) + '<div class="pm-meta">' + esc(s.webUrl || '') + '</div></span></div>'
+      ).join('') : '<div class="fu-vazio">Nenhum site encontrado.</div>')
+    );
+  } catch (e) { spErro(e.message); }
+}
+
+async function spVistaDrives(siteId, nome){
+  spCarregando('A abrir «' + nome + '»…');
+  try {
+    const j = await gJson('/sites/' + siteId + '/drives?$select=id,name,webUrl');
+    spPilha.push({ tipo: 'drives', siteId, nome });
+    $('spCorpo').innerHTML = spTopo(
+      spNavBarra(nome) +
+      ((j.value || []).map(d =>
+        '<div class="pm-item" onclick="spVistaPasta(\'' + d.id + '\', null, \'' + esc(d.name).replace(/'/g, "\\'") + '\', true)"><span>📚</span><span class="pm-desc">' + esc(d.name) + '<div class="pm-meta">Biblioteca de documentos</div></span></div>'
+      ).join('') || '<div class="fu-vazio">Sem bibliotecas.</div>')
+    );
+  } catch (e) { spErro(e.message); }
+}
+
+/* Pastas */
+async function spVistaPasta(drive, item, nome, empilhar){
+  spCarregando('A abrir a pasta…');
+  try {
+    const base = '/drives/' + drive + (item ? '/items/' + item : '/root');
+    const j = await gJson(base + '/children?$select=id,name,size,file,folder,lastModifiedDateTime&$top=200&$orderby=name');
+    if (empilhar) spPilha.push({ tipo: 'pasta', drive, item, nome });
+    const fich = (j.value || []).sort((a, b) => (!!b.folder - !!a.folder) || String(a.name).localeCompare(String(b.name), 'pt'));
+    const linhas = fich.map(f => {
+      const exc = /\.(xlsx|xlsm|xls)$/i.test(f.name || '');
+      if (f.folder) return '<div class="pm-item" onclick="spVistaPasta(\'' + drive + '\',\'' + f.id + '\',\'' + esc(f.name).replace(/'/g, "\\'") + '\', true)"><span>📁</span><span class="pm-desc">' + esc(f.name) + '</span></div>';
+      if (exc && spModo === 'importar') return '<div class="pm-item" onclick="spImportarFicheiro(\'' + drive + '\',\'' + f.id + '\',\'' + esc(f.name).replace(/'/g, "\\'") + '\')"><span>📊</span><span class="pm-desc">' + esc(f.name) + '<div class="pm-meta">' + fmtTam(f.size) + '</div></span><span class="pm-preco">Importar →</span></div>';
+      return '<div class="pm-item" style="opacity:.45;cursor:default"><span>' + (exc ? '📊' : '📄') + '</span><span class="pm-desc">' + esc(f.name) + '<div class="pm-meta">' + fmtTam(f.size) + '</div></span></div>';
+    }).join('');
+    const guardarBtn = spModo === 'guardar'
+      ? '<div style="position:sticky;bottom:0;background:#fff;padding:10px 0 2px;border-top:1px solid #eee;margin-top:10px;text-align:right"><button class="btn primario" onclick="spGuardarAqui()">💾 Guardar o Excel nesta pasta</button></div>'
+      : '';
+    $('spCorpo').innerHTML = spTopo(spNavBarra(nome) + (linhas || '<div class="fu-vazio">Pasta vazia.</div>') + guardarBtn);
+  } catch (e) { spErro(e.message); }
+}
+
+function spNavBarra(nome){
+  return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">' +
+    '<button class="btn ghost mini" onclick="spVoltar()">←</button>' +
+    '<b style="font-size:13px">' + esc(nome || '') + '</b></div>';
+}
+
+function spVoltar(){
+  spPilha.pop();
+  const topo = spPilha[spPilha.length - 1];
+  if (!topo) { spInicio(); return; }
+  if (topo.tipo === 'sites') { spPilha.pop(); spVistaSites(); }
+  else if (topo.tipo === 'drives') { spPilha.pop(); spVistaDrives(topo.siteId, topo.nome); }
+  else spVistaPasta(topo.drive, topo.item, topo.nome, false);
+}
+
+function fmtTam(n){
+  if (n == null) return '';
+  if (n > 1048576) return (n / 1048576).toFixed(1) + ' MB';
+  if (n > 1024) return Math.round(n / 1024) + ' KB';
+  return n + ' B';
+}
+
+/* Importar */
+async function spImportarFicheiro(drive, item, nome){
+  spCarregando('A descarregar «' + (nome || 'ficheiro') + '»…');
+  try {
+    const r = await gFetch('/drives/' + drive + '/items/' + item + '/content');
+    const ab = await r.arrayBuffer();
+    spFechar();
+    importarDoBuffer(ab);
+  } catch (e) { spErro(e.message); }
+}
+
+/* Guardar na pasta corrente */
+async function spGuardarAqui(){
+  const topo = spPilha[spPilha.length - 1];
+  if (!topo || topo.tipo !== 'pasta') { spErro('Navega até uma pasta primeiro.'); return; }
+  spCarregando('A gerar e a carregar o Excel…');
+  try {
+    const ge = await gerarExcelBuffer();
+    const base = '/drives/' + topo.drive + (topo.item ? '/items/' + topo.item : '/root');
+    if (ge.buf.byteLength <= 4 * 1024 * 1024) {
+      await gFetch(base + ':/' + encodeURIComponent(ge.nome) + ':/content', {
+        method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: ge.buf
+      });
+    } else {
+      // ficheiros grandes: sessão de upload
+      const sess = await (await gFetch(base + ':/' + encodeURIComponent(ge.nome) + ':/createUploadSession', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'replace' } })
+      })).json();
+      const total = ge.buf.byteLength, passo = 5 * 1024 * 1024;
+      for (let ini = 0; ini < total; ini += passo) {
+        const fim = Math.min(ini + passo, total);
+        const r = await fetch(sess.uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Range': 'bytes ' + ini + '-' + (fim - 1) + '/' + total },
+          body: ge.buf.slice(ini, fim)
+        });
+        if (!r.ok && r.status !== 202) throw new Error('upload interrompido (HTTP ' + r.status + ')');
+      }
+    }
+    spFechar();
+    toast('✓ Guardado no SharePoint: ' + ge.nome);
+  } catch (e) { spErro('Não consegui guardar: ' + e.message); }
+}
+
+function calcTotal(){
+  return atual.linhas.reduce((t, l) => t + (l.tipo === 'artigo' ? (l.quantidade || 0) * (l.preco_unitario || 0) : 0), 0);
+}
+function atualizarTotal(){
+  $('totalGeral').textContent = fmtEur(calcTotal());
+}
+
+/* ============================================================
+   Guardar
+   ============================================================ */
+async function guardarOrcamento(){
+  if (!atual) return;
+  lerCabecalho();
+  const h = atual.header;
+  if (!h.id) { toast('Indica o código do orçamento (ex.: ocWG26_120).', 'erro'); return; }
+  if (!h.nome_obra) { toast('Indica o nome da obra.', 'erro'); return; }
+  numerarLinhas();
+  const total = calcTotal();
+  if (h.estado === 'Enviado' && !h.data_envio) h.data_envio = new Date().toISOString();
+
+  const corpo = {
+    id: h.id, pedido_id: h.pedido_id || null, nome_obra: h.nome_obra,
+    cliente: h.cliente || null, email_cliente: h.email_cliente || null,
+    localizacao: h.localizacao || null, estado: h.estado, total,
+    notas: h.notas || null, data_envio: h.data_envio || null,
+    atualizado_em: new Date().toISOString()
+  };
+  try {
+    await db(NOVO, 'orcamentos_v2?on_conflict=id', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify([corpo])
+    });
+    await db(NOVO, 'orcamentos_v2_linhas?orcamento_id=eq.' + encodeURIComponent(h.id), { method: 'DELETE' });
+    if (atual.linhas.length) {
+      const linhas = atual.linhas.map((l, i) => ({
+        orcamento_id: h.id, ordem: i, tipo: l.tipo, capitulo: l.num,
+        codigo_artigo: l.codigo || null, descricao: l.descricao || '',
+        unidade: l.tipo === 'artigo' ? (l.unidade || null) : null,
+        quantidade: l.tipo === 'artigo' ? (l.quantidade || 0) : 0,
+        preco_unitario: l.tipo === 'artigo' ? (l.preco_unitario || 0) : 0
+      }));
+      await db(NOVO, 'orcamentos_v2_linhas', { method: 'POST', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify(linhas) });
+    }
+    atual.novo = false;
+    $('hId').readOnly = true;
+    $('hId').style.background = 'var(--cal)';
+    toast('Orçamento guardado — ' + fmtEur(total));
+    carregarOrcamentos();
+  } catch (e) { toast('Erro ao guardar: ' + e.message, 'erro'); }
+}
+
+/* ============================================================
+   Exportar Excel (template We Garden)
+   ============================================================ */
+async function exportarExcel(){
+  if (!atual) return;
+  const ge = await gerarExcelBuffer();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([ge.buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  a.download = ge.nome;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('Excel exportado: ' + ge.nome);
+}
+
+async function gerarExcelBuffer(){
+  lerCabecalho();
+  numerarLinhas();
+  const h = atual.header;
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Budget');
+  ws.columns = [{width:12.16},{width:23},{width:14.5},{width:13.5},{width:12.33},{width:14.33}];
+  const treb = (extra) => ({ name:'Trebuchet MS', size:11, ...(extra||{}) });
+
+  ws.getRow(1).height = 30;
+  ws.getCell('B1').value = 'WeGarden';
+  ws.getCell('B1').font = { name:'Garamond', size:15 };
+
+  ws.getRow(2).height = 37.5;
+  ws.getCell('B2').value = h.nome_obra || 'Nome Obra';
+  ws.getCell('B2').font = { name:'Trebuchet MS', size:20, bold:true };
+
+  ws.getRow(3).height = 21.75;
+  const cab = ['Artigo','Descrição','Quantidade','Unidade','Preço Un.','Preço Total'];
+  cab.forEach((t, i) => {
+    const c = ws.getCell(3, i + 1);
+    c.value = t;
+    c.font = treb(i === 0 ? { bold:true } : null);
+  });
+
+  let r = 4;
+  const primeira = r;
+  for (const l of atual.linhas) {
+    ws.getRow(r).height = 30;
+    ws.getCell(r,1).value = l.num;            ws.getCell(r,1).font = treb();
+    ws.getCell(r,2).value = l.descricao||''; ws.getCell(r,2).font = treb();
+    if (l.tipo === 'artigo') {
+      ws.getCell(r,3).value = l.quantidade || 0;       ws.getCell(r,3).font = treb(); ws.getCell(r,3).numFmt = '#,##0.00';
+      ws.getCell(r,4).value = l.unidade || '';         ws.getCell(r,4).font = treb();
+      ws.getCell(r,5).value = l.preco_unitario || 0;   ws.getCell(r,5).font = treb(); ws.getCell(r,5).numFmt = '#,##0.00 "€"';
+      ws.getCell(r,6).value = { formula: 'C' + r + '*E' + r }; ws.getCell(r,6).font = treb(); ws.getCell(r,6).numFmt = '#,##0.00 "€"';
+    }
+    r++;
+  }
+  const ultima = r - 1;
+  ws.getRow(r).height = 30; r++;             // linha em branco, como no template
+  ws.getRow(r).height = 30;
+  if (ultima >= primeira) {
+    ws.getCell(r,6).value = { formula: 'SUBTOTAL(109,F' + primeira + ':F' + ultima + ')' };
+    ws.getCell(r,6).font = treb();
+    ws.getCell(r,6).numFmt = '#,##0.00 "€"';
+  }
+
+  const buf = await wb.xlsx.writeBuffer();
+  const nome = ((h.id || 'orcamento') + ' ' + (h.nome_obra || '')).trim().replace(/[\\/:*?"<>|]/g, '-') + '.xlsx';
+  return { buf, nome };
+}
+
+/* ============================================================
+   Importar Excel (mapa de quantidades) + preencher preços
+   ============================================================ */
+async function importarExcel(file){
+  if (!file || !atual) return;
+  try { importarDoBuffer(await file.arrayBuffer()); }
+  catch (e) { toast('Erro ao importar: ' + e.message, 'erro'); }
+}
+
+function importarDoBuffer(ab){
+  if (!atual) return;
+  try {
+    const wb = XLSX.read(ab, { type:'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null });
+
+    let hi = -1, ci = {};
+    for (let i = 0; i < Math.min(rows.length, 25); i++) {
+      const cells = (rows[i] || []).map(x => norm(x));
+      const iD = cells.findIndex(c => (c||'').includes('descri') || (c||'').includes('designa'));
+      if (iD > -1) {
+        hi = i;
+        ci = {
+          d: iD,
+          n: cells.findIndex(c => (c||'') === 'artigo' || (c||'').startsWith('art') || (c||'') === 'item' || (c||'').includes('num') || (c||'') === 'n.' || (c||'') === 'cod'),
+          q: cells.findIndex(c => (c||'').includes('quant') || (c||'') === 'qtd' || (c||'') === 'qtd.'),
+          u: cells.findIndex(c => (c||'').includes('unid') || (c||'') === 'un' || (c||'') === 'un.'),
+          p: cells.findIndex(c => ((c||'').includes('preco') || (c||'').includes('valor')) && !(c||'').includes('total'))
+        };
+        break;
+      }
+    }
+    if (hi < 0) { toast('Não encontrei a linha de cabeçalhos — o ficheiro precisa de uma coluna «Descrição».', 'erro'); return; }
+
+    const novas = [];
+    for (let i = hi + 1; i < rows.length; i++) {
+      const r0 = rows[i]; if (!r0) continue;
+      const desc = String(r0[ci.d] ?? '').trim();
+      if (!desc) continue;
+      const numRaw = ci.n > -1 ? String(r0[ci.n] ?? '').trim().replace(/\.$/, '') : '';
+      const qtd = ci.q > -1 ? numPT(r0[ci.q]) : 0;
+      const un = ci.u > -1 ? String(r0[ci.u] ?? '').trim() : '';
+      const pre = ci.p > -1 ? numPT(r0[ci.p]) : 0;
+      const isNum = /^\d+(\.\d+)*$/.test(numRaw);
+      let tipo;
+      if (qtd > 0 || un) tipo = 'artigo';
+      else if (isNum) tipo = numRaw.includes('.') ? 'subcapitulo' : 'capitulo';
+      else tipo = 'capitulo';
+      novas.push({ tipo, codigo:null, descricao:desc, unidade:un, quantidade: tipo === 'artigo' ? (qtd || 1) : 0, preco_unitario: pre });
+    }
+    if (!novas.length) { toast('O ficheiro não tem linhas com descrição preenchida.', 'erro'); return; }
+
+    if (atual.linhas.length) {
+      if (confirm('Já existem linhas neste orçamento.\nOK = substituir pelas do ficheiro · Cancelar = acrescentar no fim'))
+        atual.linhas = novas;
+      else
+        atual.linhas = atual.linhas.concat(novas);
+    } else {
+      atual.linhas = novas;
+    }
+
+    renderLinhas();
+    const semPreco = atual.linhas.filter(l => l.tipo === 'artigo' && !(l.preco_unitario > 0)).length;
+    toast('Importadas ' + novas.length + ' linhas' + (semPreco ? ' · ' + semPreco + ' artigos sem preço — usa ⚡ Match automático ou clica no nº da linha' : ''));
+  } catch (e) { toast('Erro ao importar: ' + e.message, 'erro'); }
+}
+
+/* ============================================================
+   Histórico
+   ============================================================ */
+const FONTES_ANTIGAS = [
+  { fonte:'2026', url:'https://raw.githubusercontent.com/patr0cini/wegarden-orcamentos/main/data.json', embrulhado:true, api:'https://wegarden-api.onrender.com/data' },
+  { fonte:'2025', url:'https://raw.githubusercontent.com/patr0cini/wegarden-orcamentos-historico/main/data2025.json', api:'https://wegarden-orcamentos-historico.onrender.com/2025/data' },
+  { fonte:'2024', url:'https://raw.githubusercontent.com/patr0cini/wegarden-orcamentos-historico/main/data2024.json', api:'https://wegarden-orcamentos-historico.onrender.com/2024/data' }
+];
+let historicoAntigo = [];
+let histOrd = { col:'sortKey', asc:false };
+let histLista = [], histEditIdx = -1;
+
+/* Grau de interesse — mesma fórmula da plataforma 2025 */
+function calcGrau(valor, concurso, dataArranque, override){
+  if (override) return { label: override, manual:true, score: override === 'Baixo' ? 0 : override === 'Médio' ? 2 : override === 'Alto' ? 3 : 5 };
+  let pts = 0;
+  const v = Number(valor) || 0;
+  if (v >= 100000) pts += 3; else if (v >= 50000) pts += 2; else if (v >= 10000) pts += 1;
+  if (norm(concurso) === 'nao') pts += 1;
+  if (dataArranque) {
+    const mMap = { janeiro:0, fevereiro:1, marco:2, abril:3, maio:4, junho:5, julho:6, agosto:7, setembro:8, outubro:9, novembro:10, dezembro:11 };
+    const str = norm(dataArranque);
+    let mesIdx = -1, ano = new Date().getFullYear();
+    for (const k in mMap) if (str.includes(k)) { mesIdx = mMap[k]; break; }
+    const m = str.match(/20\d\d/); if (m) ano = parseInt(m[0]);
+    if (mesIdx >= 0) {
+      const diffMeses = (new Date(ano, mesIdx, 1) - Date.now()) / (1000 * 60 * 60 * 24 * 30);
+      pts += diffMeses <= 6 ? 2 : 1;
+    }
+  }
+  return { label: pts <= 1 ? 'Baixo' : pts === 2 ? 'Médio' : pts <= 4 ? 'Alto' : 'Muito Alto', manual:false, score:pts };
+}
+function grauDe(it){ const g = it.grauData || {}; return calcGrau(g.valor, g.concurso, g.dataArranque, g.override); }
+function grauChip(g){
+  const cls = { 'Baixo':'g-baixo', 'Médio':'g-medio', 'Alto':'g-alto', 'Muito Alto':'g-muitoalto' }[g.label] || 'g-baixo';
+  return '<span class="grau ' + cls + '"' + (g.manual ? ' title="definido manualmente"' : '') + '>' + g.label + (g.manual ? ' ✎' : '') + '</span>';
+}
+
+async function carregarHistoricoAntigo(){
+  const falhas = [];
+  const res = await Promise.allSettled(FONTES_ANTIGAS.map(async f => {
+    const r = await fetch(f.url, { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    let j = await r.json();
+    if (f.embrulhado) j = j.data || [];
+    return (Array.isArray(j) ? j : []).map(rec => normalizarAntigo(f.fonte, rec));
+  }));
+  historicoAntigo = [];
+  res.forEach((r, i) => {
+    if (r.status === 'fulfilled') historicoAntigo = historicoAntigo.concat(r.value);
+    else falhas.push(FONTES_ANTIGAS[i].fonte);
+  });
+  if (falhas.length) toast('Histórico indisponível: ' + falhas.join(', '), 'erro');
+  renderHistorico();
+}
+
+function normalizarAntigo(fonte, rec){
+  const nome = String(rec.nome || '');
+  const m = nome.match(/^(ocWG\d{2}_\d{2,4}[A-Za-z]?)\s*(.*)$/);
+  const adj = norm(rec.adjudicado);
+  const estado = adj === 'sim' ? 'Adjudicado' : (adj === 'nao' ? 'Perdido' : 'Enviado');
+  const followups = []
+    .concat(rec.notas ? [{ data:null, nota: rec.notas }] : [])
+    .concat((rec.notasHist || []).map(n => ({ data: n.at, nota: n.texto })))
+    .concat((rec.lembretes || []).map(l => ({ data: l.data, nota: 'Lembrete: ' + l.texto + (l.done ? ' ✓' : '') })));
+  return {
+    fonte,
+    codigo: m ? m[1] : ('#' + rec.id),
+    obra: m ? m[2] : nome,
+    cliente: rec.requerente || '',
+    responsavel: rec.responsavel || '',
+    total: Number(rec.valor) || 0,
+    dataTxt: rec.dataEnvio ? fmtData(rec.dataEnvio) : (rec.mes ? rec.mes : '—'),
+    sortKey: rec.dataEnvio || rec.addedAt || (fonte + '-01-01'),
+    estado, followups,
+    grauData: { valor: Number(rec.valor) || 0, concurso: rec.concurso, dataArranque: rec.dataArranque, override: rec.grauOverride || '' },
+    antigo: true,
+    raw: rec, idOrig: rec.id
+  };
+}
+
+function histSort(col){
+  if (histOrd.col === col) histOrd.asc = !histOrd.asc;
+  else histOrd = { col, asc: true };
+  renderHistorico();
+}
+
+function renderHistorico(){
+  const q = norm($('histPesquisa').value);
+  const ff = $('histFonte').value;
+  const fe = $('histEstado').value;
+  const fr = $('histResp').value;
+  const fg = $('histGrau').value;
+
+  const novos = orcamentos
+    .filter(o => ['Enviado','Adjudicado','Perdido'].includes(o.estado))
+    .map(o => ({
+      fonte:'Plataforma', codigo:o.id, obra:o.nome_obra || '', cliente:o.cliente || '',
+      responsavel: o.responsavel || '',
+      total:Number(o.total) || 0,
+      dataTxt: fmtData(o.data_envio),
+      sortKey: o.data_envio || o.atualizado_em || '',
+      estado:o.estado,
+      followups: (Array.isArray(o.followups) ? o.followups : [])
+        .concat((Array.isArray(o.lembretes) ? o.lembretes : []).map(l => ({ data: l.data, nota: 'Lembrete: ' + l.texto + (l.done ? ' ✓' : '') }))),
+      grauData: { valor: Number(o.total) || 0, concurso: o.concurso, dataArranque: o.data_arranque, override: o.grau_override || '' },
+      antigo:false, raw:o
+    }));
+
+  const tudo = novos.concat(historicoAntigo);
+
+  // popular filtro de responsáveis preservando a selecção
+  const selR = $('histResp'), atualR = selR.value;
+  const resps = [...new Set(tudo.map(t => t.responsavel).filter(Boolean))].sort((a,b) => a.localeCompare(b,'pt'));
+  selR.innerHTML = '<option value="">Todos os responsáveis</option>' + resps.map(r => '<option' + (r === atualR ? ' selected' : '') + '>' + esc(r) + '</option>').join('');
+
+  let lista = tudo.filter(it => {
+    if (ff && it.fonte !== ff) return false;
+    if (fe && it.estado !== fe) return false;
+    if (fr && it.responsavel !== fr) return false;
+    if (fg && grauDe(it).label !== fg) return false;
+    if (!q) return true;
+    return norm([it.codigo, it.obra, it.cliente, it.responsavel].join(' ')).includes(q);
+  });
+
+  const col = histOrd.col, asc = histOrd.asc ? 1 : -1;
+  lista.sort((a, b) => {
+    let av, bv;
+    if (col === '_grau') { av = grauDe(a).score; bv = grauDe(b).score; }
+    else { av = a[col]; bv = b[col]; }
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * asc;
+    return String(av || '').localeCompare(String(bv || ''), 'pt') * asc;
+  });
+
+  histLista = lista;
+  $('histCorpo').innerHTML = lista.length ? lista.map((it, idx) => {
+    const fonteChip = '<span class="chip ' + (it.antigo ? 'cinza' : 'verde') + '">' + esc(it.fonte) + '</span>';
+    const nFu = it.followups.length;
+    return '<tr class="clicavel-linha" onclick="abrirHistEdit(' + idx + ')" title="Clica para ver e editar">' +
+      '<td><b>' + esc(it.codigo) + '</b></td>' +
+      '<td>' + fonteChip + '</td>' +
+      '<td title="' + esc(it.obra) + '">' + esc(it.obra.length > 48 ? it.obra.slice(0,47) + '…' : (it.obra || '—')) + '</td>' +
+      '<td class="num">' + fmtEur(it.total) + '</td>' +
+      '<td>' + esc(it.dataTxt) + '</td>' +
+      '<td style="text-align:center">' + grauChip(grauDe(it)) + '</td>' +
+      '<td title="' + esc(it.cliente) + '">' + esc(it.cliente.length > 18 ? it.cliente.slice(0,17) + '…' : (it.cliente || '—')) + '</td>' +
+      '<td style="text-align:center">' + (it.responsavel ? '<span class="resp-pill">' + esc(it.responsavel) + '</span>' : '<span style="color:var(--cinza)">—</span>') + '</td>' +
+      '<td>' + chipOrc(it.estado) + '</td>' +
+      '<td style="text-align:center">' + (nFu ? '<span class="b-nota">' + nFu + '</span>' : '<span style="color:var(--cinza);font-size:11px">—</span>') + '</td>' +
+      '</tr>';
+  }).join('') : '<tr><td colspan="10" class="vazio">Nada encontrado com estes filtros.</td></tr>';
+  fuAtualizarBadge();
+}
+
+/* ===== Edição (clique na linha) ===== */
+function abrirHistEdit(idx){
+  const it = histLista[idx]; if (!it) return;
+  histEditIdx = idx;
+  $('histTitulo').innerHTML = esc(it.codigo) + ' <span class="chip ' + (it.antigo ? 'cinza' : 'verde') + '">' + esc(it.fonte) + '</span>';
+  const r = it.raw;
+  const fus = it.followups.length
+    ? '<div class="full"><label>Follow-ups e notas registadas</label><ul class="followups" style="margin:0">' +
+      it.followups.map(f => '<li>' + (f.data ? '<b>' + esc(fmtData(f.data)) + '</b> — ' : '') + esc(f.nota) + '</li>').join('') + '</ul></div>'
+    : '';
+  const estadoCampo = it.antigo
+    ? '<div><label>Adjudicado?</label><select id="hEstado">' +
+      ['','Sim','Não','Parcialmente'].map(v => '<option value="' + v + '"' + ((r.adjudicado || '') === v ? ' selected' : '') + '>' + (v || 'Em aberto') + '</option>').join('') + '</select></div>'
+    : '<div><label>Estado</label><select id="hEstado">' +
+      ['Enviado','Adjudicado','Perdido'].map(v => '<option' + (it.estado === v ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></div>';
+  const dataEnvio = it.antigo ? (r.dataEnvio || '') : (r.data_envio ? String(r.data_envio).slice(0,10) : '');
+  const arranque = it.antigo ? (r.dataArranque || '') : (r.data_arranque || '');
+  const grau = it.antigo ? (r.grauOverride || '') : (r.grau_override || '');
+  const concurso = (it.antigo ? r.concurso : r.concurso) || '';
+  const visita = (it.antigo ? r.visita : r.visita) || '';
+  const resps = [...new Set(orcamentos.map(o => o.responsavel).concat(historicoAntigo.map(h => h.responsavel)).filter(Boolean))].sort();
+  $('histCorpoEdit').innerHTML =
+    '<div class="hist-form">' +
+      '<div class="full"><label>Obra</label><input id="hObra" value="' + esc(it.obra) + '"></div>' +
+      '<div><label>Requerente</label><input id="hReq" value="' + esc(it.cliente) + '"></div>' +
+      '<div><label>Responsável</label><input id="hResp" list="dlResp" value="' + esc(it.responsavel) + '"><datalist id="dlResp">' + resps.map(x => '<option>' + esc(x) + '</option>').join('') + '</datalist></div>' +
+      '<div><label>Valor (€)</label><input id="hValor" type="number" step="0.01" value="' + (it.total || '') + '"' + (it.antigo ? '' : ' disabled title="Na Plataforma o total vem das linhas do orçamento"') + '></div>' +
+      estadoCampo +
+      '<div><label>Concurso</label><select id="hConc">' + ['','Sim','Não'].map(v => '<option value="' + v + '"' + (concurso === v ? ' selected' : '') + '>' + (v || '—') + '</option>').join('') + '</select></div>' +
+      '<div><label>Visita</label><select id="hVis">' + ['','Sim','Não'].map(v => '<option value="' + v + '"' + (visita === v ? ' selected' : '') + '>' + (v || '—') + '</option>').join('') + '</select></div>' +
+      '<div><label>Data de envio</label><input id="hDataEnvio" type="date" value="' + esc(dataEnvio) + '"></div>' +
+      '<div><label>Arranque previsto</label><input id="hArranque" placeholder="ex.: Julho 2026" value="' + esc(arranque) + '"></div>' +
+      '<div><label>Grau de interesse</label><select id="hGrau">' + ['','Baixo','Médio','Alto','Muito Alto'].map(v => '<option value="' + v + '"' + (grau === v ? ' selected' : '') + '>' + (v || '— automático —') + '</option>').join('') + '</select></div>' +
+      fus +
+      '<div class="full"><label>Nova nota de follow-up <span style="text-transform:none;letter-spacing:0;font-weight:400">(com data → lembrete agendado)</span></label>' +
+      '<div style="display:flex;gap:8px"><input id="hNovaNota" style="flex:1" placeholder="ex.: Ligar para saber a decisão"><input id="hNovaData" type="date" style="width:150px"></div></div>' +
+    '</div>';
+  $('histOverlay').classList.add('aberto');
+}
+
+function histFecharEdit(){ $('histOverlay').classList.remove('aberto'); histEditIdx = -1; }
+
+async function histGuardar(){
+  const it = histLista[histEditIdx]; if (!it) return;
+  const v = id => ($(id) ? $(id).value : '');
+  const novaNota = v('hNovaNota').trim();
+  try {
+    if (!it.antigo) {
+      const o = it.raw;
+      const corpo = {
+        nome_obra: v('hObra').trim(), cliente: v('hReq').trim(),
+        responsavel: v('hResp').trim() || null,
+        estado: v('hEstado'),
+        concurso: v('hConc') || null, visita: v('hVis') || null,
+        data_arranque: v('hArranque').trim() || null,
+        grau_override: v('hGrau') || null,
+        data_envio: v('hDataEnvio') || null,
+        atualizado_em: new Date().toISOString()
+      };
+      if (novaNota) {
+        const novaData = v('hNovaData');
+        if (novaData) {
+          const lembs = (Array.isArray(o.lembretes) ? o.lembretes.slice() : []);
+          lembs.push({ data: novaData, texto: novaNota, done: false });
+          lembs.sort((a, b) => String(a.data).localeCompare(String(b.data)));
+          corpo.lembretes = lembs;
+        } else {
+          const fus = Array.isArray(o.followups) ? o.followups.slice() : [];
+          fus.push({ data: new Date().toISOString().slice(0,10), nota: novaNota });
+          corpo.followups = fus;
+        }
+      }
+      await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(o.id), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify(corpo) });
+      toast('Guardado na Plataforma');
+      histFecharEdit();
+      await carregarOrcamentos();
+      renderHistorico();
+    } else {
+      const obra = v('hObra').trim();
+      const mud = {
+        nome: it.codigo.startsWith('#') ? obra : (it.codigo + (obra ? ' ' + obra : '')),
+        valor: v('hValor') !== '' ? parseFloat(v('hValor')) : null,
+        requerente: v('hReq').trim(),
+        responsavel: v('hResp').trim(),
+        adjudicado: v('hEstado'),
+        concurso: v('hConc'), visita: v('hVis'),
+        dataEnvio: v('hDataEnvio'),
+        dataArranque: v('hArranque').trim(),
+        grauOverride: v('hGrau')
+      };
+      if (novaNota) {
+        const novaData = v('hNovaData');
+        if (novaData) {
+          mud.lembretes = (it.raw.lembretes || []).concat([{ data: novaData, texto: novaNota, done: false }])
+            .sort((a, b) => String(a.data).localeCompare(String(b.data)));
+        } else {
+          mud.notasHist = (it.raw.notasHist || []).concat([{ at: new Date().toISOString(), texto: novaNota }]);
+        }
+      }
+      toast('A gravar em ' + it.fonte + '… o servidor pode demorar a acordar');
+      const atualizado = await histGravarAntigo(it.fonte, it.idOrig, mud);
+      // actualizar localmente sem esperar pelo GitHub raw
+      const i = historicoAntigo.findIndex(h => h.fonte === it.fonte && h.idOrig === it.idOrig);
+      if (i > -1) historicoAntigo[i] = normalizarAntigo(it.fonte, atualizado);
+      toast('✓ Guardado em ' + it.fonte);
+      histFecharEdit();
+      renderHistorico();
+    }
+  } catch (e) { toast('Erro ao guardar: ' + e.message, 'erro'); }
+}
+
+async function histGravarAntigo(f, idOrig, mud){
+  const fonte = FONTES_ANTIGAS.find(x => x.fonte === f);
+  const r = await fetch(fonte.api, { cache:'no-store' });
+  if (!r.ok) throw new Error('não consegui ler os dados actuais de ' + f + ' (HTTP ' + r.status + ')');
+  const j = await r.json();
+  const arr = Array.isArray(j) ? j : (j.data || []);
+  const i = arr.findIndex(x => x.id === idOrig);
+  if (i < 0) throw new Error('registo #' + idOrig + ' não encontrado em ' + f);
+  arr[i] = { ...arr[i], ...mud };
+  const w = await fetch(fonte.api, { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ data: arr }) });
+  if (!w.ok) throw new Error('o servidor de ' + f + ' recusou a gravação (HTTP ' + w.status + ')');
+  return arr[i];
+}
+
+/* ============================================================
+   Quadro de follow-ups (lembretes agendados de todas as fontes)
+   ============================================================ */
+let fuLista = [];
+
+function fuItens(){
+  const out = [];
+  orcamentos.forEach(o => (Array.isArray(o.lembretes) ? o.lembretes : []).forEach((l, li) => out.push({
+    fonte:'Plataforma', chave:o.id, li, data:String(l.data || ''), texto:l.texto || '', done:!!l.done,
+    codigo:o.id, obra:o.nome_obra || ''
+  })));
+  historicoAntigo.forEach(h => ((h.raw && h.raw.lembretes) || []).forEach((l, li) => out.push({
+    fonte:h.fonte, chave:h.idOrig, li, data:String(l.data || ''), texto:l.texto || '', done:!!l.done,
+    codigo:h.codigo, obra:h.obra
+  })));
+  return out;
+}
+
+function fuAtualizarBadge(){
+  const hoje = new Date().toISOString().slice(0,10);
+  const n = fuItens().filter(x => !x.done && x.data && x.data < hoje).length;
+  const b = $('fuBadge');
+  if (!b) return;
+  b.textContent = n;
+  b.style.display = n ? 'inline-flex' : 'none';
+}
+
+function fuAbrir(){
+  $('fuOverlay').classList.add('aberto');
+  fuRender();
+}
+function fuFechar(){ $('fuOverlay').classList.remove('aberto'); }
+
+function fuRender(){
+  const hoje = new Date().toISOString().slice(0,10);
+  fuLista = fuItens();
+  const atraso = fuLista.map((x, i) => [x, i]).filter(([x]) => !x.done && x.data && x.data < hoje)
+    .sort((a, b) => a[0].data.localeCompare(b[0].data));
+  const futuros = fuLista.map((x, i) => [x, i]).filter(([x]) => !x.done && (!x.data || x.data >= hoje))
+    .sort((a, b) => a[0].data.localeCompare(b[0].data));
+  const feitos = fuLista.map((x, i) => [x, i]).filter(([x]) => x.done)
+    .sort((a, b) => b[0].data.localeCompare(a[0].data));
+
+  const item = ([x, i]) => {
+    const cls = x.done ? 'feito' : (x.data < hoje ? 'atraso' : (x.data === hoje ? 'hoje' : ''));
+    const dataLbl = x.done ? fmtData(x.data)
+      : x.data < hoje ? '⚠ ' + fmtData(x.data)
+      : x.data === hoje ? '📅 Hoje'
+      : fmtData(x.data);
+    return '<div class="fu-item ' + cls + '">' +
+      '<div class="fu-conteudo">' +
+        '<div class="fu-data">' + dataLbl + ' · <b>' + esc(x.codigo) + '</b> <span class="chip ' + (x.fonte === 'Plataforma' ? 'verde' : 'cinza') + '">' + esc(x.fonte) + '</span></div>' +
+        '<div class="fu-texto">' + esc(x.texto) + '</div>' +
+        (x.obra ? '<div class="fu-obra">' + esc(x.obra.length > 60 ? x.obra.slice(0,59) + '…' : x.obra) + '</div>' : '') +
+      '</div>' +
+      '<div class="fu-btns">' +
+        '<button class="btn-ico" onclick="fuToggle(' + i + ')" title="' + (x.done ? 'Reabrir' : 'Marcar como concluído') + '">' + (x.done ? '↩' : '✓') + '</button>' +
+        '<button class="btn-ico" onclick="fuEliminar(' + i + ')" title="Eliminar">✕</button>' +
+      '</div>' +
+    '</div>';
+  };
+  const seccao = (titulo, arr) =>
+    '<div class="am-sec">' + titulo + ' (' + arr.length + ')</div>' +
+    (arr.length ? arr.map(item).join('') : '<div class="fu-vazio">Nenhum.</div>');
+
+  $('fuCorpo').innerHTML = fuLista.length
+    ? seccao('⚠ Em atraso', atraso) + seccao('📅 Futuros', futuros) + seccao('✓ Concluídos', feitos)
+    : '<div class="fu-vazio" style="padding:24px;text-align:center">Sem lembretes agendados.<br><span style="font-size:12px">Abre um orçamento no histórico e adiciona uma nota de follow-up com data.</span></div>';
+  fuAtualizarBadge();
+}
+
+async function fuGravarLembretes(x, lembs){
+  if (x.fonte === 'Plataforma') {
+    const o = orcamentos.find(z => z.id === x.chave);
+    await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(x.chave), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify({ lembretes: lembs, atualizado_em: new Date().toISOString() }) });
+    if (o) o.lembretes = lembs;
+  } else {
+    const atualizado = await histGravarAntigo(x.fonte, x.chave, { lembretes: lembs });
+    const i = historicoAntigo.findIndex(h => h.fonte === x.fonte && h.idOrig === x.chave);
+    if (i > -1) historicoAntigo[i] = normalizarAntigo(x.fonte, atualizado);
+  }
+}
+
+function fuLembretesDe(x){
+  if (x.fonte === 'Plataforma') {
+    const o = orcamentos.find(z => z.id === x.chave);
+    return Array.isArray(o?.lembretes) ? o.lembretes.slice() : [];
+  }
+  const h = historicoAntigo.find(z => z.fonte === x.fonte && z.idOrig === x.chave);
+  return ((h && h.raw && h.raw.lembretes) || []).slice();
+}
+
+async function fuToggle(i){
+  const x = fuLista[i]; if (!x) return;
+  try {
+    const lembs = fuLembretesDe(x);
+    if (!lembs[x.li]) return;
+    lembs[x.li] = { ...lembs[x.li], done: !lembs[x.li].done };
+    if (x.fonte !== 'Plataforma') toast('A gravar em ' + x.fonte + '…');
+    await fuGravarLembretes(x, lembs);
+    fuRender();
+    renderHistorico();
+  } catch (e) { toast('Erro: ' + e.message, 'erro'); }
+}
+
+async function fuEliminar(i){
+  const x = fuLista[i]; if (!x) return;
+  if (!confirm('Eliminar este lembrete?\n«' + x.texto + '»')) return;
+  try {
+    const lembs = fuLembretesDe(x);
+    lembs.splice(x.li, 1);
+    if (x.fonte !== 'Plataforma') toast('A gravar em ' + x.fonte + '…');
+    await fuGravarLembretes(x, lembs);
+    fuRender();
+    renderHistorico();
+  } catch (e) { toast('Erro: ' + e.message, 'erro'); }
+}
+
+/* ============================================================
+   Arranque
+   ============================================================ */
+mudarTab('pipeline');
+carregarPrecos();
+carregarPedidos();
+carregarOrcamentos();
+carregarHistoricoAntigo();
+</script>
+</body>
+</html>
