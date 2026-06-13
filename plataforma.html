@@ -990,7 +990,7 @@ async function criarPastaPedido(pid){
     });
     const pasta = await r.json();
     // subpastas padrão
-    for (const sub of ['Emails', 'Orçamentos', 'Peças desenhadas']) {
+    for (const sub of ['Orçamentos', 'Emails']) {
       try {
         await gFetch('/drives/' + driveId + '/items/' + pasta.id + '/children', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
