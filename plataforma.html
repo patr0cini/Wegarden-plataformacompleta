@@ -379,8 +379,9 @@ th .si{opacity:.45;font-size:10px}
       <div class="editor-barra">
         <button class="btn ghost" onclick="fecharEditor()">← Voltar</button>
         <span class="sep"></span>
+        <span id="spOrigemLabel" style="font-size:12px;color:var(--cinza);display:none">☁ <span id="spOrigemNome"></span></span>
         <button class="btn ghost" onclick="exportarExcel()">Exportar Excel</button>
-        <button class="btn ghost" onclick="spGuardarExcel()" title="Carregar o Excel preenchido na pasta SharePoint do pedido">☁ Guardar no SharePoint</button>
+        <button class="btn ghost" id="btnGuardarSP" onclick="spGuardarExcel()" title="Guardar no SharePoint">☁ Guardar no SharePoint</button>
         <button class="btn primario" onclick="guardarOrcamento()">Guardar</button>
       </div>
 
@@ -1252,7 +1253,7 @@ function renderPipeline(){
   actualizarSessaoPip();
 }
 
-function orcamentarPedido(pid){
+async function orcamentarPedido(pid){
   const p = pedidos.find(x => String(x.id) === String(pid));
   if (!p) return;
   // se já existe um orçamento com este código, abre-o
@@ -1277,6 +1278,65 @@ function orcamentarPedido(pid){
   };
   mudarTab('orcamentacao');
   abrirEditor();
+  // se o pedido tem pasta, tentar carregar o Excel da subpasta Orçamentos
+  if (p.sharepoint_url) carregarExcelDoPedido(p);
+}
+
+async function carregarExcelDoPedido(p){
+  // só se houver sessão Microsoft; sem ela, fica o editor vazio (silencioso)
+  try { spMsal(); } catch (_) { return; }
+  if (!spConta) return;
+  try {
+    const base = await gResolverUrl(p.sharepoint_url);
+    const driveId = base.parentReference && base.parentReference.driveId;
+    if (!driveId || !base.id) return;
+    // encontrar a subpasta Orçamentos
+    const filhos = await gJson('/drives/' + driveId + '/items/' + base.id + '/children?$select=id,name,folder&$top=200');
+    const orc = (filhos.value || []).find(f => f.folder && (norm(f.name) === 'orçamentos' || norm(f.name) === 'orcamentos'));
+    if (!orc) return;
+    // listar Excel dentro de Orçamentos
+    const dentro = await gJson('/drives/' + driveId + '/items/' + orc.id + '/children?$select=id,name,file,size,lastModifiedDateTime&$top=200');
+    const excels = (dentro.value || [])
+      .filter(f => f.file && /\.(xlsx|xlsm|xls)$/i.test(f.name || ''))
+      .sort((a, b) => String(b.lastModifiedDateTime).localeCompare(String(a.lastModifiedDateTime)));
+    if (!excels.length) return;
+    if (excels.length === 1) {
+      await importarExcelSP(driveId, excels[0].id, excels[0].nome || excels[0].name);
+    } else {
+      escolherExcelPedido(driveId, excels);
+    }
+  } catch (e) { toast('Não consegui ler a pasta Orçamentos: ' + e.message, 'erro'); }
+}
+
+async function importarExcelSP(driveId, itemId, nome){
+  try {
+    toast('A abrir «' + (nome || 'Excel') + '» da pasta Orçamentos…');
+    const r = await gFetch('/drives/' + driveId + '/items/' + itemId + '/content');
+    const ab = await r.arrayBuffer();
+    // memorizar a origem para futuras gravações no mesmo ficheiro
+    if (atual) atual.spOrigem = { driveId, itemId, nome };
+    importarDoBuffer(ab);
+    actualizarSpOrigemLabel();
+    toast('✓ Carregado da pasta Orçamentos: ' + (nome || ''));
+  } catch (e) { toast('Não consegui abrir o Excel: ' + e.message, 'erro'); }
+}
+
+function escolherExcelPedido(driveId, excels){
+  const fmtT = n => n > 1048576 ? (n/1048576).toFixed(1)+' MB' : (n>1024 ? Math.round(n/1024)+' KB' : (n||0)+' B');
+  $('emTitulo').textContent = '📊 Vários Excel na pasta Orçamentos';
+  $('emCorpo').innerHTML = '<div class="am-sec">Escolhe qual abrir</div>' +
+    excels.map(f =>
+      '<div class="pm-item" onclick="emExcelEscolhido(\'' + driveId + '\',\'' + f.id + '\',\'' + esc(f.name).replace(/'/g, "\\'") + '\')">' +
+        '<span>📊</span><span class="pm-desc">' + esc(f.name) +
+        '<div class="pm-meta">' + fmtT(f.size) + ' · ' + esc(fmtData(f.lastModifiedDateTime)) + '</div></span>' +
+      '</div>'
+    ).join('');
+  $('emAcoes').innerHTML = '<button class="btn ghost" onclick="emFechar()">Começar em branco</button>';
+  $('emailOverlay').classList.add('aberto');
+}
+async function emExcelEscolhido(driveId, itemId, nome){
+  emFechar();
+  await importarExcelSP(driveId, itemId, nome);
 }
 
 /* ============================================================
@@ -1346,6 +1406,22 @@ async function abrirOrcamento(id){
 /* ============================================================
    Editor
    ============================================================ */
+function actualizarSpOrigemLabel(){
+  const lbl = $('spOrigemLabel'); const nm = $('spOrigemNome'); const btn = $('btnGuardarSP');
+  if (!lbl || !nm || !btn) return;
+  const origem = atual && atual.spOrigem;
+  if (origem) {
+    nm.textContent = origem.nome;
+    lbl.style.display = '';
+    btn.title = 'Guardar e substituir «' + origem.nome + '» no SharePoint';
+    btn.textContent = '☁ Guardar no SharePoint';
+  } else {
+    lbl.style.display = 'none';
+    btn.title = 'Guardar no SharePoint';
+    btn.textContent = '☁ Guardar no SharePoint';
+  }
+}
+
 function abrirEditor(){
   $('orcLista').style.display = 'none';
   $('orcEditor').style.display = 'block';
@@ -1361,6 +1437,7 @@ function abrirEditor(){
   $('hLocal').value = h.localizacao || '';
   $('hNotas').value = h.notas || '';
   $('pesquisaPrecos').value = '';
+  actualizarSpOrigemLabel();
   renderLinhas();
 }
 
@@ -1801,7 +1878,25 @@ async function gResolverUrl(rawUrl){
 
 /* ---------- UI do modal ---------- */
 function spAbrir(){ spAbrirModo('importar'); }
-async function spGuardarExcel(){ spAbrirModo('guardar'); }
+async function spGuardarExcel(){
+  if (!atual) return;
+  // se o orçamento veio de um Excel do SharePoint, gravar directamente no ficheiro de origem
+  if (atual.spOrigem) {
+    try {
+      toast('A guardar no SharePoint…');
+      const ge = await gerarExcelBuffer();
+      const { driveId, itemId, nome } = atual.spOrigem;
+      // PUT directo substitui o ficheiro existente sem abrir o navegador
+      await gFetch('/drives/' + driveId + '/items/' + itemId + '/content', {
+        method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: ge.buf
+      });
+      toast('✓ Guardado no SharePoint: ' + nome);
+    } catch (e) { toast('Não consegui guardar: ' + e.message, 'erro'); }
+    return;
+  }
+  // sem origem conhecida → abre o navegador de pastas
+  spAbrirModo('guardar');
+}
 
 function spAbrirModo(modo){
   if (!atual) return;
