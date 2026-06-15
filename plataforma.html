@@ -2388,8 +2388,8 @@ function colLetra(n){ let s=''; while(n>0){ const m=(n-1)%26; s=String.fromCharC
 function xmlSetCelula(xml, ref, valor){
   const rowNum = ref.match(/\d+/)[0];
   const col = ref.replace(/\d+/, '');
-  // apanhar a célula completa (self-closing OU com conteúdo), capturando os atributos
-  const cellRe = new RegExp('<c r="' + ref + '"([^>]*?)\\s*(?:/>|>[\\s\\S]*?</c>)');
+  // apanhar a célula completa (self-closing OU com conteúdo), sem atravessar para outra célula
+  const cellRe = new RegExp('<c r="' + ref + '"([^>]*?)\\s*(?:/>|>(?:(?!</c>)[\\s\\S])*?</c>)');
   const m = xml.match(cellRe);
   if (m) {
     let attrs = m[1] || '';
@@ -2399,7 +2399,8 @@ function xmlSetCelula(xml, ref, valor){
     return xml.replace(cellRe, novaCel);
   }
   // célula não existe: inserir na row, ordenada por coluna
-  const rowRe = new RegExp('(<row r="' + rowNum + '"[^>]*>)([\\s\\S]*?)(</row>)');
+  // (regex seguro: o conteúdo da row não pode conter outra <row — evita atravessar linhas)
+  const rowRe = new RegExp('(<row r="' + rowNum + '"[^>]*>)((?:(?!<row )[\\s\\S])*?)(</row>)');
   if (rowRe.test(xml)) {
     return xml.replace(rowRe, (full, abre, conteudo, fecha) => {
       const cels = [...conteudo.matchAll(/<c r="([A-Z]+)\d+"[\s\S]*?(?:\/>|<\/c>)/g)];
@@ -2470,9 +2471,10 @@ async function gerarExcelOriginal(){
   }
   zip[sheetPath] = enc.encode(xml);
   // validação de segurança: o XML da folha tem de continuar bem-formado
-  const abreRow = (xml.match(/<row\b/g) || []).length, fechaRow = (xml.match(/<\/row>/g) || []).length;
+  // (contar self-closing tanto em <row/> como em <c/>, senão dá falso positivo)
+  const abreRow = (xml.match(/<row\b/g) || []).length, fechaRow = (xml.match(/<\/row>/g) || []).length, selfRow = (xml.match(/<row\b[^>]*\/>/g) || []).length;
   const abreC = (xml.match(/<c\b/g) || []).length, fechaC = (xml.match(/<\/c>/g) || []).length, selfC = (xml.match(/<c\b[^>]*\/>/g) || []).length;
-  if (abreRow !== fechaRow || abreC !== (fechaC + selfC)) {
+  if (abreRow !== (fechaRow + selfRow) || abreC !== (fechaC + selfC)) {
     throw new Error('a edição teria deixado o ficheiro inconsistente — gravação cancelada para não o corromper');
   }
   // garantir fullCalcOnLoad para os totais com fórmula recalcularem
