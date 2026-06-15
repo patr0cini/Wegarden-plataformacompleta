@@ -1445,11 +1445,7 @@ async function asExecutar(){
   asSaving = true;
   asActualizarIndicador('a guardar');
   try {
-    const ge = await gerarExcelOriginal();
-    const { driveId, itemId } = atual.spOrigem;
-    await gFetch('/drives/' + driveId + '/items/' + itemId + '/content', {
-      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: ge.buf
-    });
+    await gerarExcelOriginal();  // backend faz download + preenche + upload
     asUltimoErro = null;
     asActualizarIndicador('guardado');
   } catch (e) {
@@ -1942,15 +1938,12 @@ function spAbrir(){ spAbrirModo('importar'); }
 async function spGuardarExcel(){
   if (!atual) return;
   if (atual.spOrigem && atual.spFill) {
-    // preencher o ficheiro ORIGINAL (mantém formato) e substituí-lo no mesmo sítio
+    // preencher o ficheiro ORIGINAL via backend openpyxl (preserva 100% da formatação)
+    // o backend faz download + preenche + upload — não precisamos de fazer PUT aqui
     try {
-      toast('A guardar no ficheiro original (mantendo o formato)…');
+      toast('A guardar no SharePoint (via backend)…');
       const ge = await gerarExcelOriginal();
-      const { driveId, itemId } = atual.spOrigem;
-      await gFetch('/drives/' + driveId + '/items/' + itemId + '/content', {
-        method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: ge.buf
-      });
-      toast('✓ Guardado: ' + ge.nome + (ge.semRow ? ' (' + ge.semRow + ' linhas novas não foram escritas no original)' : ''));
+      toast('✓ Guardado: ' + ge.nome);
     } catch (e) {
       const msg = String(e.message || e);
       if (/locked/i.test(msg))
@@ -2422,94 +2415,26 @@ async function gerarExcelOriginal(){
   if (!atual.spFill || !atual.spOrigem) throw new Error('sem mapa do ficheiro original — reabre o Excel pela pasta Orçamentos');
   lerCabecalho();
   numerarLinhas();
-  // descarregar o original FRESCO e editar cirurgicamente o XML da folha
-  const { driveId, itemId } = atual.spOrigem;
-  const r = await gFetch('/drives/' + driveId + '/items/' + itemId + '/content');
-  const origBuf = new Uint8Array(await r.arrayBuffer());
-  const zip = fflate.unzipSync(origBuf);
-  const dec = new TextDecoder(), enc = new TextEncoder();
-
-  // descobrir o caminho do XML da folha certa (pela ordem em workbook.xml)
+  const tok = await spToken();
+  const { driveId, itemId, nome } = atual.spOrigem;
   const f = atual.spFill;
-  let sheetPath = Object.keys(zip).find(k => /^xl\/worksheets\/sheet1\.xml$/.test(k));
-  try {
-    const wbXml = dec.decode(zip['xl/workbook.xml']);
-    const relsXml = dec.decode(zip['xl/_rels/workbook.xml.rels']);
-    // encontrar o sheet cujo nome bate com a folha importada
-    const sheets = [...wbXml.matchAll(/<sheet[^>]*name="([^"]*)"[^>]*r:id="([^"]*)"[^>]*\/>/g)];
-    let rid = null;
-    for (const s of sheets) { if (s[1] === f.nomeFolha) { rid = s[2]; break; } }
-    if (!rid && sheets.length) rid = sheets[0][2];
-    if (rid) {
-      const rel = [...relsXml.matchAll(/<Relationship[^>]*Id="([^"]*)"[^>]*Target="([^"]*)"[^>]*\/>/g)].find(x => x[1] === rid);
-      if (rel) {
-        let tgt = rel[2].replace(/^\//, '').replace(/^xl\//, '');
-        sheetPath = 'xl/' + tgt.replace(/^worksheets\//, 'worksheets/');
-        if (!zip[sheetPath]) sheetPath = 'xl/' + tgt;
-      }
-    }
-  } catch (_) { /* fallback sheet1 */ }
-  if (!sheetPath || !zip[sheetPath]) sheetPath = Object.keys(zip).find(k => /^xl\/worksheets\/.*\.xml$/.test(k));
-
-  let xml = dec.decode(zip[sheetPath]);
-  const colP = f.colP > -1 ? colLetra(f.startCol + f.colP + 1) : null;
-  const colQ = f.colQ > -1 ? colLetra(f.startCol + f.colQ + 1) : null;
-  const colV = f.colV > -1 ? colLetra(f.startCol + f.colV + 1) : null;
-  let semRow = 0;
+  const prices = [];
   for (const l of atual.linhas) {
-    if (l.tipo !== 'artigo') continue;
-    if (!l._row) { semRow++; continue; }
-    if (colP) xml = xmlSetCelula(xml, colP + l._row, (l.preco_unitario || 0));
-    if (colQ) xml = xmlSetCelula(xml, colQ + l._row, (l.quantidade || 0));
-    if (colV) {
-      // só escrever o total se a célula NÃO tiver fórmula (preservar fórmulas existentes)
-      const ref = colV + l._row;
-      const bloco = (xml.match(new RegExp('<c r="' + ref + '"[\\s\\S]*?(?:/>|</c>)')) || [''])[0];
-      const temFormula = /<f[ >\/]/.test(bloco);
-      if (!temFormula) xml = xmlSetCelula(xml, ref, (l.quantidade || 0) * (l.preco_unitario || 0));
-    }
+    if (l.tipo !== 'artigo' || !l._row) continue;
+    const entry = { sheet: f.nomeFolha, row: l._row };
+    if (f.colP > -1) { entry.priceCol = f.startCol + f.colP; entry.price = l.preco_unitario || 0; }
+    if (f.colQ > -1) { entry.qtyCol = f.startCol + f.colQ; entry.qty = l.quantidade || 0; }
+    if (f.colV > -1) { entry.totalCol = f.startCol + f.colV; entry.total = (l.quantidade || 0) * (l.preco_unitario || 0); }
+    prices.push(entry);
   }
-  zip[sheetPath] = enc.encode(xml);
-  // validação de segurança: o XML da folha tem de continuar bem-formado
-  // (contar self-closing tanto em <row/> como em <c/>, senão dá falso positivo)
-  const abreRow = (xml.match(/<row\b/g) || []).length, fechaRow = (xml.match(/<\/row>/g) || []).length, selfRow = (xml.match(/<row\b[^>]*\/>/g) || []).length;
-  const abreC = (xml.match(/<c\b/g) || []).length, fechaC = (xml.match(/<\/c>/g) || []).length, selfC = (xml.match(/<c\b[^>]*\/>/g) || []).length;
-  if (abreRow !== (fechaRow + selfRow) || abreC !== (fechaC + selfC)) {
-    throw new Error('a edição teria deixado o ficheiro inconsistente — gravação cancelada para não o corromper');
-  }
-  // garantir fullCalcOnLoad para os totais com fórmula recalcularem
-  try {
-    let wbXml = dec.decode(zip['xl/workbook.xml']);
-    if (!/calcPr/.test(wbXml)) wbXml = wbXml.replace(/<\/workbook>/, '<calcPr fullCalcOnLoad="1"/></workbook>');
-    else wbXml = wbXml.replace(/<calcPr([^>]*)\/>/, '<calcPr$1 fullCalcOnLoad="1"/>');
-    zip['xl/workbook.xml'] = enc.encode(wbXml);
-  } catch (_) { /* opcional */ }
-
-  // remover a cadeia de cálculo (calcChain.xml): após mexer em valores fica desatualizada e
-  // faz o Excel "reparar" o livro (esvazia a folha). O Excel reconstrói-a sozinho ao abrir.
-  try {
-    if (zip['xl/calcChain.xml']) {
-      delete zip['xl/calcChain.xml'];
-      // tirar a referência ao calcChain do [Content_Types].xml
-      if (zip['[Content_Types].xml']) {
-        let ct = dec.decode(zip['[Content_Types].xml']);
-        ct = ct.replace(/<Override[^>]*calcChain[^>]*\/>/g, '');
-        zip['[Content_Types].xml'] = enc.encode(ct);
-      }
-      // tirar a relação do calcChain do workbook.xml.rels
-      if (zip['xl/_rels/workbook.xml.rels']) {
-        let rl = dec.decode(zip['xl/_rels/workbook.xml.rels']);
-        rl = rl.replace(/<Relationship[^>]*calcChain[^>]*\/>/g, '');
-        zip['xl/_rels/workbook.xml.rels'] = enc.encode(rl);
-      }
-    }
-    // limpar resíduos de gravações anteriores falhadas
-    for (const k of Object.keys(zip)) { if (/^\[trash\]/.test(k)) delete zip[k]; }
-  } catch (_) { /* opcional */ }
-
-  const out = fflate.zipSync(zip);
-  const nome = (atual.spOrigem && atual.spOrigem.nome) || (((atual.header.id || 'orcamento')) + '.xlsx');
-  return { buf: out.buffer, nome, semRow };
+  const resp = await fetch('https://wegarden-orcamentacao.onrender.com/api/fill-excel-sp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ drive_id: driveId, item_id: itemId, sp_token: tok, prices })
+  });
+  const result = await resp.json();
+  if (!resp.ok || result.error) throw new Error(result.error || 'Erro do backend ao gravar');
+  return { nome, semRow: 0, escritos: prices.length };
 }
 
 /* ============================================================
