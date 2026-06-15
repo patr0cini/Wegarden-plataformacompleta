@@ -1429,14 +1429,14 @@ let asTimer = null, asSaving = false, asUltimoErro = null;
 
 function asAgendar(){
   // só age se houver ficheiro de origem com buffer original e sessão activa
-  if (!atual || !atual.spOrigem || !atual.spBuffer || !spConta) return;
+  if (!atual || !atual.spOrigem || !atual.spFill || !spConta) return;
   clearTimeout(asTimer);
   asTimer = setTimeout(asExecutar, 30000);
   asActualizarIndicador('pendente');
 }
 
 async function asExecutar(){
-  if (!atual || !atual.spOrigem || !atual.spBuffer || asSaving) return;
+  if (!atual || !atual.spOrigem || !atual.spFill || asSaving) return;
   asSaving = true;
   asActualizarIndicador('a guardar');
   try {
@@ -1936,7 +1936,7 @@ async function gResolverUrl(rawUrl){
 function spAbrir(){ spAbrirModo('importar'); }
 async function spGuardarExcel(){
   if (!atual) return;
-  if (atual.spOrigem && atual.spBuffer) {
+  if (atual.spOrigem && atual.spFill) {
     // preencher o ficheiro ORIGINAL (mantém formato) e substituí-lo no mesmo sítio
     try {
       toast('A guardar no ficheiro original (mantendo o formato)…');
@@ -2310,7 +2310,6 @@ async function importarExcel(file){
 function importarDoBuffer(ab, preservar){
   if (!atual) return;
   try {
-    const abraCopia = preservar ? ab.slice(0) : null;  // guardar original intacto para gravar mantendo o formato
     const wb = XLSX.read(ab, { type:'array' });
     const nomeFolha = wb.SheetNames[0];
     const ws = wb.Sheets[nomeFolha];
@@ -2366,9 +2365,8 @@ function importarDoBuffer(ab, preservar){
       atual.linhas = novas;
     }
 
-    // memorizar para gravar de volta no original sem desconfigurar o formato
+    // memorizar o mapa de colunas/linhas para gravar de volta no original sem desconfigurar o formato
     if (preservar) {
-      atual.spBuffer = abraCopia;
       atual.spFill = { nomeFolha, startCol, colP: ci.p, colQ: ci.q, colV: ci.v };
     }
 
@@ -2380,19 +2378,25 @@ function importarDoBuffer(ab, preservar){
 
 /* Gera o Excel preenchendo o ficheiro ORIGINAL (mantém formato, cores, fórmulas) */
 async function gerarExcelOriginal(){
-  if (!atual.spBuffer || !atual.spFill) throw new Error('sem ficheiro original em memória — reabre o Excel pela pasta Orçamentos');
+  if (!atual.spFill || !atual.spOrigem) throw new Error('sem mapa do ficheiro original — reabre o Excel pela pasta Orçamentos');
   lerCabecalho();
   numerarLinhas();
+  // descarregar o original FRESCO do SharePoint (bytes íntegros) em vez de reutilizar o buffer da importação
+  const { driveId, itemId } = atual.spOrigem;
+  const r = await gFetch('/drives/' + driveId + '/items/' + itemId + '/content');
+  const origBuf = await r.arrayBuffer();
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(atual.spBuffer);
+  await wb.xlsx.load(origBuf);
   const f = atual.spFill;
   const ws = wb.getWorksheet(f.nomeFolha) || wb.worksheets[0];
+  if (!ws) throw new Error('não encontrei a folha no ficheiro original');
   const colP = f.colP > -1 ? f.startCol + f.colP + 1 : -1;
   const colQ = f.colQ > -1 ? f.startCol + f.colQ + 1 : -1;
   const colV = f.colV > -1 ? f.startCol + f.colV + 1 : -1;
-  let semRow = 0;
+  let semRow = 0, escritos = 0;
   for (const l of atual.linhas) {
-    if (l.tipo !== 'artigo' || !l._row) { if (l.tipo === 'artigo' && !l._row) semRow++; continue; }
+    if (l.tipo !== 'artigo') continue;
+    if (!l._row) { semRow++; continue; }
     const row = ws.getRow(l._row);
     if (colP > -1) row.getCell(colP).value = (l.preco_unitario || 0);
     if (colQ > -1) row.getCell(colQ).value = (l.quantidade || 0);
@@ -2401,10 +2405,12 @@ async function gerarExcelOriginal(){
       const ehFormula = cv.value && typeof cv.value === 'object' && (cv.value.formula || cv.value.sharedFormula);
       if (!ehFormula) cv.value = (l.quantidade || 0) * (l.preco_unitario || 0);
     }
+    row.commit && row.commit();
+    escritos++;
   }
   const buf = await wb.xlsx.writeBuffer();
   const nome = (atual.spOrigem && atual.spOrigem.nome) || (((atual.header.id || 'orcamento')) + '.xlsx');
-  return { buf, nome, semRow };
+  return { buf, nome, semRow, escritos };
 }
 
 /* ============================================================
