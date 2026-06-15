@@ -2483,6 +2483,28 @@ async function gerarExcelOriginal(){
     zip['xl/workbook.xml'] = enc.encode(wbXml);
   } catch (_) { /* opcional */ }
 
+  // remover a cadeia de cálculo (calcChain.xml): após mexer em valores fica desatualizada e
+  // faz o Excel "reparar" o livro (esvazia a folha). O Excel reconstrói-a sozinho ao abrir.
+  try {
+    if (zip['xl/calcChain.xml']) {
+      delete zip['xl/calcChain.xml'];
+      // tirar a referência ao calcChain do [Content_Types].xml
+      if (zip['[Content_Types].xml']) {
+        let ct = dec.decode(zip['[Content_Types].xml']);
+        ct = ct.replace(/<Override[^>]*calcChain[^>]*\/>/g, '');
+        zip['[Content_Types].xml'] = enc.encode(ct);
+      }
+      // tirar a relação do calcChain do workbook.xml.rels
+      if (zip['xl/_rels/workbook.xml.rels']) {
+        let rl = dec.decode(zip['xl/_rels/workbook.xml.rels']);
+        rl = rl.replace(/<Relationship[^>]*calcChain[^>]*\/>/g, '');
+        zip['xl/_rels/workbook.xml.rels'] = enc.encode(rl);
+      }
+    }
+    // limpar resíduos de gravações anteriores falhadas
+    for (const k of Object.keys(zip)) { if (/^\[trash\]/.test(k)) delete zip[k]; }
+  } catch (_) { /* opcional */ }
+
   const out = fflate.zipSync(zip);
   const nome = (atual.spOrigem && atual.spOrigem.nome) || (((atual.header.id || 'orcamento')) + '.xlsx');
   return { buf: out.buffer, nome, semRow };
