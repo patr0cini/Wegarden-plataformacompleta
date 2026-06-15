@@ -2387,31 +2387,34 @@ function colLetra(n){ let s=''; while(n>0){ const m=(n-1)%26; s=String.fromCharC
 
 function xmlSetCelula(xml, ref, valor){
   const rowNum = ref.match(/\d+/)[0];
-  const cellRe = new RegExp('<c r="' + ref + '"([^>]*?)(?:/>|>.*?</c>)', 's');
-  if (cellRe.test(xml)) {
-    return xml.replace(cellRe, (full, attrs) => {
-      attrs = (attrs || '').replace(/\s+t="[^"]*"/, '');           // remover tipo string → fica número
-      return '<c r="' + ref + '"' + attrs + '><v>' + valor + '</v></c>';
-    });
+  const col = ref.replace(/\d+/, '');
+  // apanhar a célula completa (self-closing OU com conteúdo), capturando os atributos
+  const cellRe = new RegExp('<c r="' + ref + '"([^>]*?)\\s*(?:/>|>[\\s\\S]*?</c>)');
+  const m = xml.match(cellRe);
+  if (m) {
+    let attrs = m[1] || '';
+    // manter só o estilo (s="..."); remover tipo (t="...") para ficar número
+    const s = attrs.match(/\ss="\d+"/);
+    const novaCel = '<c r="' + ref + '"' + (s ? s[0] : '') + '><v>' + valor + '</v></c>';
+    return xml.replace(cellRe, novaCel);
   }
-  // célula não existe: inserir na row, na posição ordenada por coluna
-  const rowRe = new RegExp('(<row r="' + rowNum + '"[^>]*>)(.*?)(</row>)', 's');
+  // célula não existe: inserir na row, ordenada por coluna
+  const rowRe = new RegExp('(<row r="' + rowNum + '"[^>]*>)([\\s\\S]*?)(</row>)');
   if (rowRe.test(xml)) {
-    const col = ref.replace(/\d+/, '');
     return xml.replace(rowRe, (full, abre, conteudo, fecha) => {
       const cels = [...conteudo.matchAll(/<c r="([A-Z]+)\d+"[\s\S]*?(?:\/>|<\/c>)/g)];
       const nova = '<c r="' + ref + '"><v>' + valor + '</v></c>';
       let inserido = false, out = '';
       for (const c of cels) {
         const cc = c[1];
-        if (!inserido && cc.length > col.length || (!inserido && cc.length === col.length && cc > col)) { out += nova; inserido = true; }
+        if (!inserido && (cc.length > col.length || (cc.length === col.length && cc > col))) { out += nova; inserido = true; }
         out += c[0];
       }
       if (!inserido) out += nova;
       return abre + out + fecha;
     });
   }
-  return xml;
+  return xml;  // sem a row → não mexe
 }
 
 async function gerarExcelOriginal(){
@@ -2466,6 +2469,12 @@ async function gerarExcelOriginal(){
     }
   }
   zip[sheetPath] = enc.encode(xml);
+  // validação de segurança: o XML da folha tem de continuar bem-formado
+  const abreRow = (xml.match(/<row\b/g) || []).length, fechaRow = (xml.match(/<\/row>/g) || []).length;
+  const abreC = (xml.match(/<c\b/g) || []).length, fechaC = (xml.match(/<\/c>/g) || []).length, selfC = (xml.match(/<c\b[^>]*\/>/g) || []).length;
+  if (abreRow !== fechaRow || abreC !== (fechaC + selfC)) {
+    throw new Error('a edição teria deixado o ficheiro inconsistente — gravação cancelada para não o corromper');
+  }
   // garantir fullCalcOnLoad para os totais com fórmula recalcularem
   try {
     let wbXml = dec.decode(zip['xl/workbook.xml']);
