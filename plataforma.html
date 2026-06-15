@@ -1315,7 +1315,7 @@ async function importarExcelSP(driveId, itemId, nome){
     const ab = await r.arrayBuffer();
     // memorizar a origem para futuras gravações no mesmo ficheiro
     if (atual) atual.spOrigem = { driveId, itemId, nome };
-    importarDoBuffer(ab);
+    importarDoBuffer(ab, true);
     actualizarSpOrigemLabel();
     toast('✓ Carregado da pasta Orçamentos: ' + (nome || ''));
   } catch (e) { toast('Não consegui abrir o Excel: ' + e.message, 'erro'); }
@@ -1420,6 +1420,62 @@ function actualizarSpOrigemLabel(){
     btn.title = 'Guardar no SharePoint';
     btn.textContent = '☁ Guardar no SharePoint';
   }
+}
+
+/* ============================================================
+   Auto-save no SharePoint (30s debounce após alterações)
+   ============================================================ */
+let asTimer = null, asSaving = false, asUltimoErro = null;
+
+function asAgendar(){
+  // só age se houver ficheiro de origem com buffer original e sessão activa
+  if (!atual || !atual.spOrigem || !atual.spBuffer || !spConta) return;
+  clearTimeout(asTimer);
+  asTimer = setTimeout(asExecutar, 30000);
+  asActualizarIndicador('pendente');
+}
+
+async function asExecutar(){
+  if (!atual || !atual.spOrigem || !atual.spBuffer || asSaving) return;
+  asSaving = true;
+  asActualizarIndicador('a guardar');
+  try {
+    const ge = await gerarExcelOriginal();
+    const { driveId, itemId } = atual.spOrigem;
+    await gFetch('/drives/' + driveId + '/items/' + itemId + '/content', {
+      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: ge.buf
+    });
+    asUltimoErro = null;
+    asActualizarIndicador('guardado');
+  } catch (e) {
+    const msg = String(e.message || e);
+    if (/locked/i.test(msg)) {
+      asUltimoErro = 'bloqueado';
+      asActualizarIndicador('bloqueado');
+      // retry em 60s
+      asTimer = setTimeout(asExecutar, 60000);
+    } else {
+      asUltimoErro = msg;
+      asActualizarIndicador('erro');
+    }
+  } finally { asSaving = false; }
+}
+
+function asActualizarIndicador(estado){
+  const lbl = $('spOrigemLabel');
+  if (!lbl) return;
+  const icons = { pendente:'⏱', 'a guardar':'⟳', guardado:'✓', bloqueado:'🔒', erro:'⚠' };
+  const cores = { pendente:'var(--cinza)', 'a guardar':'var(--cinza)', guardado:'#2e6b2a', bloqueado:'#e67e00', erro:'#a33' };
+  const titulos = { pendente:'A guardar em breve…', 'a guardar':'A guardar…', guardado:'Guardado no SharePoint', bloqueado:'Ficheiro bloqueado (Excel Online aberto) — vai tentar de novo em 60s', erro:'Erro ao guardar: ' + (asUltimoErro || '') };
+  const ic = $('asIndicador');
+  if (!ic) {
+    const sp = document.createElement('span');
+    sp.id = 'asIndicador';
+    sp.style.cssText = 'font-size:11px;margin-left:6px';
+    lbl.appendChild(sp);
+  }
+  const el = $('asIndicador');
+  if (el) { el.textContent = icons[estado] || ''; el.style.color = cores[estado] || 'var(--cinza)'; el.title = titulos[estado] || ''; }
 }
 
 function abrirEditor(){
@@ -1880,18 +1936,39 @@ async function gResolverUrl(rawUrl){
 function spAbrir(){ spAbrirModo('importar'); }
 async function spGuardarExcel(){
   if (!atual) return;
-  // se o orçamento veio de um Excel do SharePoint, gravar directamente no ficheiro de origem
-  if (atual.spOrigem) {
+  if (atual.spOrigem && atual.spBuffer) {
+    // preencher o ficheiro ORIGINAL (mantém formato) e substituí-lo no mesmo sítio
     try {
-      toast('A guardar no SharePoint…');
-      const ge = await gerarExcelBuffer();
-      const { driveId, itemId, nome } = atual.spOrigem;
-      // PUT directo substitui o ficheiro existente sem abrir o navegador
+      toast('A guardar no ficheiro original (mantendo o formato)…');
+      const ge = await gerarExcelOriginal();
+      const { driveId, itemId } = atual.spOrigem;
       await gFetch('/drives/' + driveId + '/items/' + itemId + '/content', {
         method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: ge.buf
       });
-      toast('✓ Guardado no SharePoint: ' + nome);
-    } catch (e) { toast('Não consegui guardar: ' + e.message, 'erro'); }
+      toast('✓ Guardado: ' + ge.nome + (ge.semRow ? ' (' + ge.semRow + ' linhas novas não foram escritas no original)' : ''));
+    } catch (e) {
+      const msg = String(e.message || e);
+      if (/locked/i.test(msg))
+        toast('O ficheiro está aberto no Excel/SharePoint — fecha-o e tenta de novo.', 'erro');
+      else
+        toast('Não consegui guardar: ' + msg, 'erro');
+    }
+    return;
+  }
+  if (atual.spOrigem) {
+    // origem conhecida mas sem buffer (sessão antiga) — guardar cópia no template na pasta
+    try {
+      toast('A gerar e guardar no SharePoint…');
+      const ge = await gerarExcelBuffer();
+      const { driveId, pastaId } = atual.spOrigem;
+      await gFetch('/drives/' + driveId + '/items/' + pastaId + ':/' + encodeURIComponent(ge.nome) + ':/content', {
+        method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: ge.buf
+      });
+      toast('✓ Guardado na pasta Orçamentos: ' + ge.nome);
+    } catch (e) {
+      const msg = String(e.message || e);
+      toast(/locked/i.test(msg) ? 'O ficheiro está bloqueado — fecha o Excel Online e tenta de novo.' : ('Não consegui guardar: ' + msg), 'erro');
+    }
     return;
   }
   // sem origem conhecida → abre o navegador de pastas
@@ -2106,6 +2183,7 @@ function calcTotal(){
 }
 function atualizarTotal(){
   $('totalGeral').textContent = fmtEur(calcTotal());
+  asAgendar();
 }
 
 /* ============================================================
@@ -2229,12 +2307,16 @@ async function importarExcel(file){
   catch (e) { toast('Erro ao importar: ' + e.message, 'erro'); }
 }
 
-function importarDoBuffer(ab){
+function importarDoBuffer(ab, preservar){
   if (!atual) return;
   try {
+    const abraCopia = preservar ? ab.slice(0) : null;  // guardar original intacto para gravar mantendo o formato
     const wb = XLSX.read(ab, { type:'array' });
-    const ws = wb.Sheets[wb.SheetNames[0]];
+    const nomeFolha = wb.SheetNames[0];
+    const ws = wb.Sheets[nomeFolha];
     const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null });
+    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+    const startRow = range.s.r, startCol = range.s.c;
 
     let hi = -1, ci = {};
     for (let i = 0; i < Math.min(rows.length, 25); i++) {
@@ -2242,12 +2324,15 @@ function importarDoBuffer(ab){
       const iD = cells.findIndex(c => (c||'').includes('descri') || (c||'').includes('designa'));
       if (iD > -1) {
         hi = i;
+        const ip = cells.findIndex(c => (c||'').includes('preco') && !(c||'').includes('total'));
+        const ipv = ip > -1 ? ip : cells.findIndex(c => (c||'').includes('valor') && !(c||'').includes('total'));
         ci = {
           d: iD,
           n: cells.findIndex(c => (c||'') === 'artigo' || (c||'').startsWith('art') || (c||'') === 'item' || (c||'').includes('num') || (c||'') === 'n.' || (c||'') === 'cod'),
           q: cells.findIndex(c => (c||'').includes('quant') || (c||'') === 'qtd' || (c||'') === 'qtd.'),
           u: cells.findIndex(c => (c||'').includes('unid') || (c||'') === 'un' || (c||'') === 'un.'),
-          p: cells.findIndex(c => ((c||'').includes('preco') || (c||'').includes('valor')) && !(c||'').includes('total'))
+          p: ipv,
+          v: cells.findIndex((c, idx) => idx !== ipv && ((c||'').includes('valor') || (c||'').includes('total') || (c||'').includes('montante')))
         };
         break;
       }
@@ -2268,7 +2353,7 @@ function importarDoBuffer(ab){
       if (qtd > 0 || un) tipo = 'artigo';
       else if (isNum) tipo = numRaw.includes('.') ? 'subcapitulo' : 'capitulo';
       else tipo = 'capitulo';
-      novas.push({ tipo, codigo:null, descricao:desc, unidade:un, quantidade: tipo === 'artigo' ? (qtd || 1) : 0, preco_unitario: pre });
+      novas.push({ tipo, codigo:null, descricao:desc, unidade:un, quantidade: tipo === 'artigo' ? (qtd || 1) : 0, preco_unitario: pre, _row: startRow + i + 1, _fromFile: true });
     }
     if (!novas.length) { toast('O ficheiro não tem linhas com descrição preenchida.', 'erro'); return; }
 
@@ -2281,10 +2366,45 @@ function importarDoBuffer(ab){
       atual.linhas = novas;
     }
 
+    // memorizar para gravar de volta no original sem desconfigurar o formato
+    if (preservar) {
+      atual.spBuffer = abraCopia;
+      atual.spFill = { nomeFolha, startCol, colP: ci.p, colQ: ci.q, colV: ci.v };
+    }
+
     renderLinhas();
     const semPreco = atual.linhas.filter(l => l.tipo === 'artigo' && !(l.preco_unitario > 0)).length;
     toast('Importadas ' + novas.length + ' linhas' + (semPreco ? ' · ' + semPreco + ' artigos sem preço — usa ⚡ Match automático ou clica no nº da linha' : ''));
   } catch (e) { toast('Erro ao importar: ' + e.message, 'erro'); }
+}
+
+/* Gera o Excel preenchendo o ficheiro ORIGINAL (mantém formato, cores, fórmulas) */
+async function gerarExcelOriginal(){
+  if (!atual.spBuffer || !atual.spFill) throw new Error('sem ficheiro original em memória — reabre o Excel pela pasta Orçamentos');
+  lerCabecalho();
+  numerarLinhas();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(atual.spBuffer);
+  const f = atual.spFill;
+  const ws = wb.getWorksheet(f.nomeFolha) || wb.worksheets[0];
+  const colP = f.colP > -1 ? f.startCol + f.colP + 1 : -1;
+  const colQ = f.colQ > -1 ? f.startCol + f.colQ + 1 : -1;
+  const colV = f.colV > -1 ? f.startCol + f.colV + 1 : -1;
+  let semRow = 0;
+  for (const l of atual.linhas) {
+    if (l.tipo !== 'artigo' || !l._row) { if (l.tipo === 'artigo' && !l._row) semRow++; continue; }
+    const row = ws.getRow(l._row);
+    if (colP > -1) row.getCell(colP).value = (l.preco_unitario || 0);
+    if (colQ > -1) row.getCell(colQ).value = (l.quantidade || 0);
+    if (colV > -1) {
+      const cv = row.getCell(colV);
+      const ehFormula = cv.value && typeof cv.value === 'object' && (cv.value.formula || cv.value.sharedFormula);
+      if (!ehFormula) cv.value = (l.quantidade || 0) * (l.preco_unitario || 0);
+    }
+  }
+  const buf = await wb.xlsx.writeBuffer();
+  const nome = (atual.spOrigem && atual.spOrigem.nome) || (((atual.header.id || 'orcamento')) + '.xlsx');
+  return { buf, nome, semRow };
 }
 
 /* ============================================================
