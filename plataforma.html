@@ -570,6 +570,69 @@ th .si{opacity:.45;font-size:10px}
   </div>
 </div>
 
+<style>
+/* ===== Modal de mapeamento de colunas ===== */
+.cm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.52);z-index:4000;display:none;align-items:center;justify-content:center}
+.cm-overlay.aberto{display:flex}
+.cm-caixa{background:#fff;width:92vw;max-width:1050px;max-height:90vh;border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.22);display:flex;flex-direction:column;overflow:hidden}
+.cm-cab{background:var(--verde);color:#fff;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.cm-cab-titulo{font-size:15px;font-weight:600}
+.cm-cab-sub{font-size:11px;opacity:.8;margin-top:2px}
+.cm-corpo{flex:1;overflow-y:auto;padding:16px 20px}
+.cm-controles{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:14px;font-size:12px;color:var(--cinza)}
+.cm-controles label{display:flex;align-items:center;gap:6px;font-weight:500}
+.cm-controles select{border:1px solid #ddd;border-radius:5px;padding:4px 8px;font-size:12px;background:#fff}
+.cm-preview-wrap{border:1px solid #e0e0dc;border-radius:6px;overflow:auto;max-height:220px;margin-bottom:14px;background:#fafaf9}
+.cm-preview{border-collapse:collapse;font-size:11px;font-family:monospace;width:max-content;min-width:100%}
+.cm-preview th,.cm-preview td{border:1px solid #e0e0dc;padding:3px 8px;text-align:left;vertical-align:top;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis}
+.cm-preview thead th{background:#1e3a28;color:#fff;font-weight:600;position:sticky;top:0;z-index:2}
+.cm-preview tbody td.cm-ri{background:#f5f5f3;color:#999;text-align:right;width:32px;position:sticky;left:0}
+.cm-preview tbody tr.cm-hrow td{background:#fef9e2;font-weight:700}
+.cm-preview .cm-mapeada{background:#e8f5e9 !important;border-left:2px solid var(--verde);border-right:2px solid var(--verde)}
+.cm-sec{font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin:14px 0 8px}
+.cm-grelha{display:grid;grid-template-columns:repeat(3,1fr);gap:10px 16px;margin-bottom:10px}
+.cm-campo{display:flex;flex-direction:column;gap:3px}
+.cm-campo label{font-size:11px;font-weight:600;color:#555}
+.cm-campo label .req{color:#c00;margin-left:3px}
+.cm-campo select{border:1px solid #ddd;border-radius:5px;padding:6px 8px;font-size:12px;background:#fff}
+.cm-campo.invalido select{border-color:#c00;background:#fff5f5}
+.cm-aviso{font-size:12px;color:#c00;min-height:18px;margin-top:6px}
+.cm-acoes{padding:12px 20px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:8px;flex-shrink:0}
+</style>
+
+<div id="cmOverlay" class="cm-overlay">
+  <div class="cm-caixa">
+    <div class="cm-cab">
+      <div>
+        <div class="cm-cab-titulo">📋 Confirmar colunas do ficheiro</div>
+        <div class="cm-cab-sub" id="cmSub"></div>
+      </div>
+      <button class="btn ghost mini" onclick="cmCancelar()" style="color:#fff;border-color:rgba(255,255,255,.4)">✕ Cancelar</button>
+    </div>
+    <div class="cm-corpo">
+      <div class="cm-controles">
+        <label>Folha: <select id="cmFolha" onchange="cmMudarFolha()"></select></label>
+        <label>Linha de cabeçalho: <select id="cmLinhaCab" onchange="cmRefreshCab()"></select></label>
+      </div>
+      <div class="cm-preview-wrap"><table class="cm-preview" id="cmPreview"></table></div>
+      <div class="cm-sec">Mapeamento de colunas</div>
+      <div class="cm-grelha">
+        <div class="cm-campo" id="cfRef"><label>Ref / Artigo (nº)</label><select id="cmRef" onchange="cmRealcar()"></select></div>
+        <div class="cm-campo" id="cfDesc"><label>Descrição <span class="req">*</span></label><select id="cmDesc" onchange="cmRealcar()"></select></div>
+        <div class="cm-campo" id="cfUnid"><label>Unidade <span class="req">*</span></label><select id="cmUnid" onchange="cmRealcar()"></select></div>
+        <div class="cm-campo" id="cfQtd"><label>Quantidade <span class="req">*</span></label><select id="cmQtd" onchange="cmRealcar()"></select></div>
+        <div class="cm-campo" id="cfPreco"><label>Preço unitário <span class="req">*</span></label><select id="cmPreco" onchange="cmRealcar()"></select></div>
+        <div class="cm-campo" id="cfTotal"><label>Preço total <span class="req">*</span></label><select id="cmTotal" onchange="cmRealcar()"></select></div>
+      </div>
+      <div class="cm-aviso" id="cmAviso"></div>
+    </div>
+    <div class="cm-acoes">
+      <button class="btn ghost" onclick="cmCancelar()">Cancelar</button>
+      <button class="btn primario" id="cmOK" onclick="cmConfirmar()">Confirmar e importar</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -1318,11 +1381,10 @@ async function importarExcelSP(driveId, itemId, nome){
     toast('A abrir «' + (nome || 'Excel') + '» da pasta Orçamentos…');
     const r = await gFetch('/drives/' + driveId + '/items/' + itemId + '/content');
     const ab = await r.arrayBuffer();
-    // memorizar a origem para futuras gravações no mesmo ficheiro
     if (atual) atual.spOrigem = { driveId, itemId, nome };
-    importarDoBuffer(ab, true);
     actualizarSpOrigemLabel();
-    toast('✓ Carregado da pasta Orçamentos: ' + (nome || ''));
+    const wb = XLSX.read(ab, { type:'array' });
+    cmAbrir(wb, nome || 'Excel', true, null);
   } catch (e) { toast('Não consegui abrir o Excel: ' + e.message, 'erro'); }
 }
 
@@ -2299,42 +2361,231 @@ async function gerarExcelBuffer(){
 /* ============================================================
    Importar Excel (mapa de quantidades) + preencher preços
    ============================================================ */
+/* ============================================================
+   Correspondência de colunas (mapeamento manual antes de importar)
+   ============================================================ */
+const CM_HDR_WORDS = ['un','un.','unid','unidade','unit','quant','qtd','qty','designa','descri',
+                      'artigo','art','cap','item','cod','ref','preco','price','valor','total','importe'];
+const CM_UNIT_SET = new Set(['m2','m3','ml','m','un','un.','vg','vg.','v.g.','kg','l','m²','m³','hrs','ha','hr']);
+
+function cmNorm(s){
+  return String(s||'').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-z0-9]/g,' ').replace(/\s+/g,' ').trim();
+}
+function cmIsUnidade(v){
+  const s = cmNorm(String(v||'')).replace(/\s/g,'');
+  return CM_UNIT_SET.has(s) || /^(m[23]?|ml|vg|un|kg|hr|v\.g\.)\.?$/.test(s);
+}
+function cmAcharCab(rows){
+  for (let i=0; i<Math.min(rows.length,25); i++){
+    const vals = (rows[i]||[]).map(v => cmNorm(String(v||'')));
+    const naoVazio = vals.filter(v => v && v!=='nan' && v!=='none');
+    if (naoVazio.length < 2) continue;
+    const hits = CM_HDR_WORDS.reduce((s,w)=> s+(vals.some(v=>v.includes(w))?1:0),0);
+    const temUnid  = vals.some(v => v==='un.'||v==='un'||v==='unid'||v==='unid.'||v==='unidade'||v==='unit');
+    const temQtd   = vals.some(v => v.includes('quant')||v.includes('qtd')||v.includes('qty'));
+    const temPreco = vals.some(v => v.includes('p.u')||v.includes('preco un')||v.includes('unitari')||v==='preco');
+    if (hits>=3 && naoVazio.length>=3 && (temUnid||(temQtd&&temPreco))) return i;
+  }
+  return null;
+}
+function cmAcharCols(hrow){
+  const c = {ref:-1,desc:-1,unit:-1,qty:-1,price:-1,total:-1};
+  (hrow||[]).forEach((v,ci)=>{
+    const s = cmNorm(String(v||''));
+    if (!s||s==='nan') return;
+    if (c.ref  <0 && /artigo|art[o°º]|cap|item|cod|ref|sub cap/.test(s)) c.ref  = ci;
+    if (c.desc <0 && /descri|designa/.test(s))                          c.desc = ci;
+    if (c.unit <0 && /^un$|^un[ id]|unidade|unit|^unid$/.test(s))       c.unit = ci;
+    if (c.qty  <0 && /quant|qtd|qty/.test(s))                           c.qty  = ci;
+    if (c.price<0 && /p u\b|p unit|unitari|preco un|price u|valor unit|^preco$|^pu$/.test(s)) c.price = ci;
+    if (c.total<0 && /total|importe/.test(s))                           c.total = ci;
+  });
+  return c;
+}
+function cmLetra(n){ let s=''; n=n+1; while(n>0){ const r=(n-1)%26; s=String.fromCharCode(65+r)+s; n=Math.floor((n-1)/26);} return s; }
+
+let CM_ESTADO = null;
+
+/* Abre o modal de correspondência. preservar=true grava spFill (gravação no SP). */
+function cmAbrir(wb, nome, preservar, onConfirmar){
+  const folhas = wb.SheetNames.map(name => {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header:1, defval:null });
+    return { name, rows, hi: cmAcharCab(rows) };
+  }).filter(s => s.rows.length > 0);
+  if (!folhas.length){ toast('O ficheiro não tem dados.', 'erro'); return; }
+
+  let idxDef = folhas.findIndex(s => s.hi !== null);
+  if (idxDef < 0) idxDef = 0;
+
+  CM_ESTADO = { wb, nome, folhas, idx: idxDef, preservar, onConfirmar };
+
+  const fSel = $('cmFolha');
+  fSel.innerHTML = folhas.map((s,i)=>
+    '<option value="'+i+'"'+(i===idxDef?' selected':'')+'>'+esc(s.name)+(s.hi===null?' (sem cabeçalho detectado)':'')+'</option>'
+  ).join('');
+  $('cmSub').textContent = 'Ficheiro: ' + nome + ' · ' + folhas.length + ' folha' + (folhas.length>1?'s':'');
+
+  cmRefreshFolha();
+  $('cmOverlay').classList.add('aberto');
+}
+
+function cmRefreshFolha(){
+  const st = CM_ESTADO; if (!st) return;
+  const folha = st.folhas[st.idx];
+  const hiDef = folha.hi !== null ? folha.hi : 0;
+  const maxRow = Math.min(folha.rows.length, 25);
+  let opts = '';
+  for (let i=0; i<maxRow; i++){
+    const prev = (folha.rows[i]||[]).filter(v=>v!==null&&String(v).trim()!=='')
+      .slice(0,3).map(v=>String(v).trim().substring(0,25)).join(' | ');
+    opts += '<option value="'+i+'"'+(i===hiDef?' selected':'')+'>Linha '+(i+1)+(prev?' — '+esc(prev):'')+'</option>';
+  }
+  $('cmLinhaCab').innerHTML = opts;
+  cmRefreshCab();
+}
+
+function cmRefreshCab(){
+  const st = CM_ESTADO; if (!st) return;
+  const folha = st.folhas[st.idx];
+  const hi = parseInt($('cmLinhaCab').value, 10);
+  const rows = folha.rows;
+
+  let nCols = 0;
+  for (let i=hi; i<Math.min(rows.length, hi+15); i++){
+    if (rows[i] && rows[i].length > nCols) nCols = rows[i].length;
+  }
+  if (nCols < 6) nCols = 6;
+
+  const det = cmAcharCols(rows[hi] || []);
+  // se não achou unidade pelo cabeçalho, procurar por valores típicos (m2, un, ml...) nas linhas seguintes
+  if (det.unit < 0){
+    for (let ri=hi+1; ri<Math.min(hi+15, rows.length); ri++){
+      for (let ci=0; ci<(rows[ri]||[]).length; ci++){
+        if (cmIsUnidade(rows[ri][ci])){ det.unit = ci; break; }
+      }
+      if (det.unit >= 0) break;
+    }
+  }
+  if (det.unit >= 0){
+    if (det.desc < 0)  det.desc  = det.unit - 1;
+    if (det.qty < 0)   det.qty   = det.unit + 1;
+    if (det.price < 0) det.price = det.qty + 1;
+    if (det.total < 0) det.total = det.price + 1;
+  }
+  if (det.ref < 0 && det.desc > 0) det.ref = det.desc - 1;
+
+  const opts = ['<option value="-1">— Não usar —</option>'];
+  for (let c=0; c<nCols; c++){
+    const h = String((rows[hi]||[])[c] || '').trim().substring(0,30);
+    opts.push('<option value="'+c+'">'+cmLetra(c)+(h?' — '+esc(h):'')+'</option>');
+  }
+  const optsStr = opts.join('');
+  const campos = [['cmRef',det.ref],['cmDesc',det.desc],['cmUnid',det.unit],['cmQtd',det.qty],['cmPreco',det.price],['cmTotal',det.total]];
+  for (const [id,def] of campos){ const sel=$(id); sel.innerHTML=optsStr; sel.value=String(def); }
+
+  cmRenderPreview(hi, nCols);
+  cmRealcar();
+}
+
+function cmRenderPreview(hi, nCols){
+  const st = CM_ESTADO; if (!st) return;
+  const rows = st.folhas[st.idx].rows;
+  const ini = Math.max(0, hi-2), fim = Math.min(rows.length, hi+12);
+  let html = '<thead><tr><th class="cm-ri">#</th>';
+  for (let c=0;c<nCols;c++) html += '<th data-col="'+c+'">'+cmLetra(c)+'</th>';
+  html += '</tr></thead><tbody>';
+  for (let r=ini;r<fim;r++){
+    const isHdr = r===hi;
+    html += '<tr'+(isHdr?' class="cm-hrow"':'')+'><td class="cm-ri">'+(r+1)+'</td>';
+    for (let c=0;c<nCols;c++){
+      let v=(rows[r]||[])[c]; if (v===null||v===undefined) v='';
+      v=String(v).substring(0,80);
+      html += '<td data-col="'+c+'">'+esc(v)+'</td>';
+    }
+    html += '</tr>';
+  }
+  html += '</tbody>';
+  $('cmPreview').innerHTML = html;
+}
+
+function cmRealcar(){
+  document.querySelectorAll('#cmPreview .cm-mapeada').forEach(el=>el.classList.remove('cm-mapeada'));
+  const cols = new Set();
+  ['cmRef','cmDesc','cmUnid','cmQtd','cmPreco','cmTotal'].forEach(id=>{
+    const v = parseInt($(id).value,10); if (v>=0) cols.add(v);
+  });
+  cols.forEach(c=> document.querySelectorAll('#cmPreview [data-col="'+c+'"]').forEach(el=>el.classList.add('cm-mapeada')));
+  cmValidar();
+}
+
+function cmValidar(){
+  // obrigatórios: Descrição, Unidade, Preço unitário, Preço total
+  const req = [['cmDesc','Descrição','cfDesc'],['cmUnid','Unidade','cfUnid'],['cmPreco','Preço unitário','cfPreco'],['cmTotal','Preço total','cfTotal']];
+  const faltam = [];
+  req.forEach(([id,label,fid])=>{
+    const f=$(fid), v=parseInt($(id).value,10);
+    if (v<0){ faltam.push(label); if(f) f.classList.add('invalido'); }
+    else if(f) f.classList.remove('invalido');
+  });
+  const visto = {}; let dup = null;
+  ['cmRef','cmDesc','cmUnid','cmQtd','cmPreco','cmTotal'].forEach(id=>{
+    const v=parseInt($(id).value,10); if (v<0) return;
+    if (visto[v]) dup = cmLetra(v); visto[v]=id;
+  });
+  let msg='';
+  if (faltam.length) msg='⚠ Falta mapear: '+faltam.join(', ');
+  else if (dup) msg='⚠ Coluna '+dup+' usada em mais do que um campo.';
+  $('cmAviso').textContent = msg;
+  $('cmOK').disabled = !!msg;
+}
+
+function cmMudarFolha(){ CM_ESTADO.idx = parseInt($('cmFolha').value,10); cmRefreshFolha(); }
+
+function cmCancelar(){
+  $('cmOverlay').classList.remove('aberto');
+  CM_ESTADO = null;
+}
+
+function cmConfirmar(){
+  const st = CM_ESTADO; if (!st) return;
+  const folha = st.folhas[st.idx];
+  const hi = parseInt($('cmLinhaCab').value,10);
+  const ci = {
+    n: parseInt($('cmRef').value,10),
+    d: parseInt($('cmDesc').value,10),
+    u: parseInt($('cmUnid').value,10),
+    q: parseInt($('cmQtd').value,10),
+    p: parseInt($('cmPreco').value,10),
+    v: parseInt($('cmTotal').value,10)
+  };
+  const preservar = st.preservar, cb = st.onConfirmar, wb = st.wb;
+  $('cmOverlay').classList.remove('aberto');
+  CM_ESTADO = null;
+  try {
+    importarDoBuffer(wb, folha, hi, ci, preservar);
+  } catch (e) { toast('Erro ao processar: '+e.message, 'erro'); return; }
+  if (cb) cb();
+}
+
 async function importarExcel(file){
   if (!file || !atual) return;
-  try { importarDoBuffer(await file.arrayBuffer()); }
+  try {
+    const wb = XLSX.read(await file.arrayBuffer(), { type:'array' });
+    cmAbrir(wb, file.name || 'Excel', false, null);
+  }
   catch (e) { toast('Erro ao importar: ' + e.message, 'erro'); }
 }
 
-function importarDoBuffer(ab, preservar){
+function importarDoBuffer(wb, folha, hi, ci, preservar){
   if (!atual) return;
   try {
-    const wb = XLSX.read(ab, { type:'array' });
-    const nomeFolha = wb.SheetNames[0];
+    const nomeFolha = folha.name || folha.nome;
     const ws = wb.Sheets[nomeFolha];
-    const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null });
     const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
     const startRow = range.s.r, startCol = range.s.c;
-
-    let hi = -1, ci = {};
-    for (let i = 0; i < Math.min(rows.length, 25); i++) {
-      const cells = (rows[i] || []).map(x => norm(x));
-      const iD = cells.findIndex(c => (c||'').includes('descri') || (c||'').includes('designa'));
-      if (iD > -1) {
-        hi = i;
-        const ip = cells.findIndex(c => (c||'').includes('preco') && !(c||'').includes('total'));
-        const ipv = ip > -1 ? ip : cells.findIndex(c => (c||'').includes('valor') && !(c||'').includes('total'));
-        ci = {
-          d: iD,
-          n: cells.findIndex(c => (c||'') === 'artigo' || (c||'').startsWith('art') || (c||'') === 'item' || (c||'').includes('num') || (c||'') === 'n.' || (c||'') === 'cod'),
-          q: cells.findIndex(c => (c||'').includes('quant') || (c||'') === 'qtd' || (c||'') === 'qtd.'),
-          u: cells.findIndex(c => (c||'').includes('unid') || (c||'') === 'un' || (c||'') === 'un.'),
-          p: ipv,
-          v: cells.findIndex((c, idx) => idx !== ipv && ((c||'').includes('valor') || (c||'').includes('total') || (c||'').includes('montante')))
-        };
-        break;
-      }
-    }
-    if (hi < 0) { toast('Não encontrei a linha de cabeçalhos — o ficheiro precisa de uma coluna «Descrição».', 'erro'); return; }
+    const rows = folha.rows;
 
     const novas = [];
     for (let i = hi + 1; i < rows.length; i++) {
@@ -2350,28 +2601,26 @@ function importarDoBuffer(ab, preservar){
       if (qtd > 0 || un) tipo = 'artigo';
       else if (isNum) tipo = numRaw.includes('.') ? 'subcapitulo' : 'capitulo';
       else tipo = 'capitulo';
-      novas.push({ tipo, codigo:null, descricao:desc, unidade:un, quantidade: tipo === 'artigo' ? (qtd || 1) : 0, preco_unitario: pre, _row: startRow + i + 1, _fromFile: true });
+      novas.push({ tipo, codigo:null, descricao:desc, unidade:un, quantidade: tipo==='artigo'?(qtd||1):0, preco_unitario:pre, _row: startRow+i+1, _fromFile:true });
     }
-    if (!novas.length) { toast('O ficheiro não tem linhas com descrição preenchida.', 'erro'); return; }
+    if (!novas.length){ toast('O ficheiro não tem linhas com descrição preenchida.', 'erro'); return; }
 
     if (atual.linhas.length) {
-      if (confirm('Já existem linhas neste orçamento.\nOK = substituir pelas do ficheiro · Cancelar = acrescentar no fim'))
+      if (confirm('Já existem linhas neste orçamento.\nOK = substituir · Cancelar = acrescentar no fim'))
         atual.linhas = novas;
-      else
-        atual.linhas = atual.linhas.concat(novas);
+      else atual.linhas = atual.linhas.concat(novas);
     } else {
       atual.linhas = novas;
     }
 
-    // memorizar o mapa de colunas/linhas para gravar de volta no original sem desconfigurar o formato
     if (preservar) {
-      atual.spFill = { nomeFolha, startCol, colP: ci.p, colQ: ci.q, colV: ci.v };
+      atual.spFill = { nomeFolha: nomeFolha, startCol, colP: ci.p, colQ: ci.q, colV: ci.v };
     }
 
-    renderLinhas();
-    const semPreco = atual.linhas.filter(l => l.tipo === 'artigo' && !(l.preco_unitario > 0)).length;
-    toast('Importadas ' + novas.length + ' linhas' + (semPreco ? ' · ' + semPreco + ' artigos sem preço — usa ⚡ Match automático ou clica no nº da linha' : ''));
-  } catch (e) { toast('Erro ao importar: ' + e.message, 'erro'); }
+    renderLinhas(); actualizarSpOrigemLabel();
+    const semPreco = atual.linhas.filter(l=>l.tipo==='artigo'&&!(l.preco_unitario>0)).length;
+    toast('Importadas '+novas.length+' linhas'+(semPreco?' · '+semPreco+' artigos sem preço — usa ⚡ Match automático':''));
+  } catch(e){ toast('Erro ao importar: '+e.message, 'erro'); }
 }
 
 /* Gera o Excel preenchendo o ficheiro ORIGINAL (mantém formato, cores, fórmulas) */
@@ -2421,6 +2670,7 @@ async function gerarExcelOriginal(){
   const prices = [];
   for (const l of atual.linhas) {
     if (l.tipo !== 'artigo' || !l._row) continue;
+    // ci.p/q/v são relativos ao início do range; somar startCol → coluna absoluta (A=0); backend soma +1
     const entry = { sheet: f.nomeFolha, row: l._row };
     if (f.colP > -1) { entry.priceCol = f.startCol + f.colP; entry.price = l.preco_unitario || 0; }
     if (f.colQ > -1) { entry.qtyCol = f.startCol + f.colQ; entry.qty = l.quantidade || 0; }
