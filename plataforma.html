@@ -1321,19 +1321,30 @@ function renderPipeline(){
   actualizarSessaoPip();
 }
 
+/* Extrai o código ocWG26_NNN do nome da pasta do SharePoint (sharepoint_url) */
+function codigoDaPasta(url){
+  if (!url) return '';
+  let s = String(url);
+  try { s = decodeURIComponent(s); } catch (_) { /* usa o original */ }
+  const m = s.match(/ocWG\d{2}_\d{3}/);
+  return m ? m[0] : '';
+}
+
 async function orcamentarPedido(pid){
   const p = pedidos.find(x => String(x.id) === String(pid));
   if (!p) return;
+  // código efetivo: o da pipeline ou, se vazio, o que está no nome da pasta já criada
+  const codigoEfetivo = p.codigo || codigoDaPasta(p.sharepoint_url);
   // se já existe um orçamento com este código, abre-o
-  if (p.codigo) {
-    const existente = orcamentos.find(o => o.id === p.codigo);
+  if (codigoEfetivo) {
+    const existente = orcamentos.find(o => o.id === codigoEfetivo);
     if (existente) { mudarTab('orcamentacao'); abrirOrcamento(existente.id); toast('Já existia um orçamento com este código — aberto.'); return; }
   }
   atual = {
     novo: true,
     header: {
-      id: p.codigo || '',
-      pedido_id: p.codigo || String(p.id),
+      id: codigoEfetivo,
+      pedido_id: codigoEfetivo || String(p.id),
       nome_obra: p.pedido || '',
       cliente: p.remetente || '',
       email_cliente: p.email || '',
