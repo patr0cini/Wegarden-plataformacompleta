@@ -165,6 +165,10 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .editor-barra .sep{flex:1}
 
 .pesquisa-wrap{position:relative;margin-bottom:12px}
+.forn-bar{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.forn-lbl{font-size:12px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+.forn-bar select{padding:6px 10px;font-size:13px;border:1px solid var(--linha);border-radius:8px;background:#fff;font-weight:600;color:var(--verde);cursor:pointer}
+.resultado .forn{color:var(--cinza);font-size:11px;flex:none;background:var(--verde-suave);padding:1px 7px;border-radius:6px}
 .pesquisa-wrap input{width:100%;padding:11px 14px;font-size:14px}
 #resultadosPrecos{
   position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:40;
@@ -415,6 +419,10 @@ th .si{opacity:.45;font-size:10px}
       </div>
 
       <div class="pesquisa-wrap">
+        <div class="forn-bar">
+          <span class="forn-lbl">Tabela de preços de:</span>
+          <select id="fornecedorSel" onchange="aplicarFornecedor(this.value)"></select>
+        </div>
         <input type="text" id="pesquisaPrecos" placeholder="Pesquisar artigo na tabela de preços…  (ex: acer, relva, mão de obra)" autocomplete="off">
         <div id="resultadosPrecos"></div>
       </div>
@@ -734,8 +742,11 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 /* ============================================================
    Estado global
    ============================================================ */
-let precos = [];            // [{d, dn, u, p, c}]
+let precos = [];            // [{d, dn, u, p, c, f}] — vista filtrada pelo fornecedor ativo
 let precosInfo = null;      // {n, quando}
+let wbPrecos = null;        // workbook da tabela de preços em memória (todas as folhas)
+let fornecedores = [];      // nomes das folhas (fornecedores)
+let fornecedorAtivo = '';   // folha/fornecedor selecionado
 let pedidos = [];
 let orcamentos = [];
 let atual = null;           // {header:{...}, linhas:[...]}
@@ -802,53 +813,90 @@ async function carregarPrecos(){
     }
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const ab = await r.arrayBuffer();
-    const wb = XLSX.read(ab, { type: 'array' });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
-
-    // localizar a linha de cabeçalhos (contém "Artigo" e "Preço")
-    let hi = -1, ci = {};
-    for (let i = 0; i < Math.min(rows.length, 20); i++) {
-      const cells = (rows[i] || []).map(x => norm(x));
-      const iD = cells.findIndex(c => (c||'').includes('artigo') || (c||'').includes('descri'));
-      const iP = cells.findIndex(c => (c||'').includes('preco'));
-      if (iD > -1 && iP > -1) {
-        hi = i;
-        ci = {
-          d: iD, p: iP,
-          u: cells.findIndex(c => (c||'').includes('unid')),
-          c: cells.findIndex(c => (c||'') === 'codigo' || (c||'').startsWith('cod') || (c||'').includes('ref'))
-        };
-        break;
-      }
-    }
-    if (hi < 0) throw new Error('Não encontrei os cabeçalhos (Artigo / Preço) na primeira folha do ficheiro.');
-
-    precos = [];
-    for (let i = hi + 1; i < rows.length; i++) {
-      const r0 = rows[i]; if (!r0) continue;
-      const d = r0[ci.d];
-      if (d == null || String(d).trim() === '') continue;
-      const p = numPT(r0[ci.p]);
-      if (!(p > 0)) continue;
-      precos.push({
-        d: String(d).trim(),
-        dn: norm(d),
-        u: ci.u > -1 ? (r0[ci.u] ?? '') : '',
-        p,
-        c: ci.c > -1 ? String(r0[ci.c] ?? '') : ''
-      });
-    }
-    precosInfo = { n: precos.length, quando: new Date() };
-    IDF = null; precosTok = null;
-    chip.className = 'ok';
-    txt.textContent = precos.length.toLocaleString('pt-PT') + ' artigos · ' + precosInfo.quando.toLocaleTimeString('pt-PT', {hour:'2-digit',minute:'2-digit'});
+    wbPrecos = XLSX.read(ab, { type: 'array' });
+    fornecedores = wbPrecos.SheetNames.slice();
+    popularSeletorFornecedores();
+    // escolher folha ativa: manter a anterior, senão "Preços de Venda", senão a 1ª
+    if (!fornecedorAtivo || !fornecedores.includes(fornecedorAtivo))
+      fornecedorAtivo = fornecedores.find(n => /venda/i.test(n)) || fornecedores[0];
+    aplicarFornecedor(fornecedorAtivo);
   } catch (e) {
     chip.className = 'erro';
     txt.textContent = 'Tabela de preços indisponível';
     console.error(e);
     toast('Tabela de preços: ' + e.message, 'erro');
   }
+}
+
+/* Extrai os artigos {d,dn,u,p,c,f} de uma folha (deteta a linha de cabeçalho) */
+function precosDaFolha(rows, fornecedor){
+  let hi = -1, ci = {};
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const cells = (rows[i] || []).map(x => norm(x));
+    const iD = cells.findIndex(c => (c||'').includes('artigo') || (c||'').includes('descri'));
+    const iP = cells.findIndex(c => (c||'').includes('preco'));
+    if (iD > -1 && iP > -1) {
+      hi = i;
+      ci = {
+        d: iD, p: iP,
+        u: cells.findIndex(c => (c||'').includes('unid')),
+        c: cells.findIndex(c => (c||'') === 'codigo' || (c||'').startsWith('cod') || (c||'').includes('ref'))
+      };
+      break;
+    }
+  }
+  if (hi < 0) return [];
+  const out = [];
+  for (let i = hi + 1; i < rows.length; i++) {
+    const r0 = rows[i]; if (!r0) continue;
+    const d = r0[ci.d];
+    if (d == null || String(d).trim() === '') continue;
+    const p = numPT(r0[ci.p]);
+    if (!(p > 0)) continue;
+    out.push({
+      d: String(d).trim(),
+      dn: norm(d),
+      u: ci.u > -1 ? (r0[ci.u] ?? '') : '',
+      p,
+      c: ci.c > -1 ? String(r0[ci.c] ?? '') : '',
+      f: fornecedor
+    });
+  }
+  return out;
+}
+
+function popularSeletorFornecedores(){
+  const sel = $('fornecedorSel'); if (!sel) return;
+  const opcoes = fornecedores.map(n => '<option' + (n === fornecedorAtivo ? ' selected' : '') + '>' + esc(n) + '</option>');
+  opcoes.push('<option value="*"' + (fornecedorAtivo === '*' ? ' selected' : '') + '>— Todos os fornecedores —</option>');
+  sel.innerHTML = opcoes.join('');
+}
+
+/* Troca a folha/fornecedor ativo e repopula a tabela de pesquisa a partir do ficheiro em memória */
+function aplicarFornecedor(nome){
+  if (!wbPrecos) return;
+  fornecedorAtivo = nome;
+  const sel = $('fornecedorSel'); if (sel && sel.value !== nome) sel.value = nome;
+  const ws = wbPrecos.Sheets[nome];
+  let lista = [];
+  if (nome === '*') {
+    for (const fn of fornecedores) {
+      const w = wbPrecos.Sheets[fn]; if (!w) continue;
+      lista = lista.concat(precosDaFolha(XLSX.utils.sheet_to_json(w, { header:1, defval:null }), fn));
+    }
+  } else {
+    lista = ws ? precosDaFolha(XLSX.utils.sheet_to_json(ws, { header:1, defval:null }), nome) : [];
+  }
+  precos = lista;
+  precosInfo = { n: precos.length, quando: new Date() };
+  IDF = null; precosTok = null;  // forçar reconstrução do índice de pesquisa
+  const chip = $('precosChip'), txt = $('precosTexto');
+  if (chip && txt) {
+    chip.className = 'ok';
+    const etiqueta = nome === '*' ? 'todos os fornecedores' : nome;
+    txt.textContent = precos.length.toLocaleString('pt-PT') + ' artigos · ' + etiqueta;
+  }
+  if ($('pesquisaPrecos') && $('pesquisaPrecos').value) renderResultados();
 }
 
 /* pesquisa */
@@ -878,7 +926,7 @@ function renderResultados(){
     if (ok) { res.push(a); if (res.length >= 60) break; }
   }
   box.innerHTML = res.length
-    ? res.map((a, i) => '<div class="resultado" data-i="' + i + '"><span class="desc">' + esc(a.d) + '</span><span class="un">' + esc(a.u) + '</span><span class="preco">' + fmtEur(a.p) + '</span></div>').join('')
+    ? res.map((a, i) => '<div class="resultado" data-i="' + i + '"><span class="desc">' + esc(a.d) + '</span>' + (fornecedorAtivo === '*' && a.f ? '<span class="forn">' + esc(a.f) + '</span>' : '') + '<span class="un">' + esc(a.u) + '</span><span class="preco">' + fmtEur(a.p) + '</span></div>').join('')
     : '<div class="resultado-nota">Sem resultados para «' + esc($('pesquisaPrecos').value) + '».</div>';
   box._res = res;
   box.classList.add('aberto');
