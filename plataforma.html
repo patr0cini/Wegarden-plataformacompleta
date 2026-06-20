@@ -165,9 +165,13 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .editor-barra .sep{flex:1}
 
 .pesquisa-wrap{position:relative;margin-bottom:12px}
-.forn-bar{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.forn-bar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
 .forn-lbl{font-size:12px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.03em}
-.forn-bar select{padding:6px 10px;font-size:13px;border:1px solid var(--linha);border-radius:8px;background:#fff;font-weight:600;color:var(--verde);cursor:pointer}
+.forn-chips{display:flex;gap:6px;flex-wrap:wrap}
+.forn-chip{padding:4px 11px;font-size:12.5px;border:1px solid var(--linha);border-radius:999px;background:#fff;color:var(--cinza);cursor:pointer;font-weight:600;transition:all .12s}
+.forn-chip:hover{border-color:var(--verde)}
+.forn-chip.on{background:var(--verde);border-color:var(--verde);color:#fff}
+.forn-chip .forn-n{opacity:.7;font-weight:500;font-size:11px;margin-left:2px}
 .resultado .forn{color:var(--cinza);font-size:11px;flex:none;background:var(--verde-suave);padding:1px 7px;border-radius:6px}
 .pesquisa-wrap input{width:100%;padding:11px 14px;font-size:14px}
 #resultadosPrecos{
@@ -420,8 +424,8 @@ th .si{opacity:.45;font-size:10px}
 
       <div class="pesquisa-wrap">
         <div class="forn-bar">
-          <span class="forn-lbl">Tabela de preços de:</span>
-          <select id="fornecedorSel" onchange="aplicarFornecedor(this.value)"></select>
+          <span class="forn-lbl">Fornecedores:</span>
+          <div id="fornChips" class="forn-chips"></div>
         </div>
         <input type="text" id="pesquisaPrecos" placeholder="Pesquisar artigo na tabela de preços…  (ex: acer, relva, mão de obra)" autocomplete="off">
         <div id="resultadosPrecos"></div>
@@ -742,11 +746,11 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 /* ============================================================
    Estado global
    ============================================================ */
-let precos = [];            // [{d, dn, u, p, c, f}] — vista filtrada pelo fornecedor ativo
+let precos = [];            // [{d, dn, u, p, c, f}] — TODOS os fornecedores
 let precosInfo = null;      // {n, quando}
-let wbPrecos = null;        // workbook da tabela de preços em memória (todas as folhas)
-let fornecedores = [];      // nomes das folhas (fornecedores)
-let fornecedorAtivo = '';   // folha/fornecedor selecionado
+let wbPrecos = null;        // workbook da tabela de preços em memória
+let fornecedores = [];      // nomes das folhas (fornecedores), por ordem
+let ACTIVE_SHEETS = new Set(); // fornecedores ativos na pesquisa
 let pedidos = [];
 let orcamentos = [];
 let atual = null;           // {header:{...}, linhas:[...]}
@@ -815,11 +819,22 @@ async function carregarPrecos(){
     const ab = await r.arrayBuffer();
     wbPrecos = XLSX.read(ab, { type: 'array' });
     fornecedores = wbPrecos.SheetNames.slice();
-    popularSeletorFornecedores();
-    // escolher folha ativa: manter a anterior, senão "Preços de Venda", senão a 1ª
-    if (!fornecedorAtivo || !fornecedores.includes(fornecedorAtivo))
-      fornecedorAtivo = fornecedores.find(n => /venda/i.test(n)) || fornecedores[0];
-    aplicarFornecedor(fornecedorAtivo);
+    // carregar TODOS os fornecedores para uma única tabela (cada artigo guarda a folha de origem)
+    precos = [];
+    for (const nome of fornecedores) {
+      const ws = wbPrecos.Sheets[nome];
+      if (!ws) continue;
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+      precos = precos.concat(precosDaFolha(rows, nome));
+    }
+    if (!precos.length) throw new Error('Não encontrei artigos com preço em nenhuma folha.');
+    // por defeito, todos os fornecedores ativos
+    if (!ACTIVE_SHEETS.size) ACTIVE_SHEETS = new Set(fornecedores);
+    else ACTIVE_SHEETS = new Set([...ACTIVE_SHEETS].filter(s => fornecedores.includes(s)));
+    precosInfo = { n: precos.length, quando: new Date() };
+    IDF = null; precosTok = null;
+    construirChipsFornecedor();
+    actualizarChipPrecos();
   } catch (e) {
     chip.className = 'erro';
     txt.textContent = 'Tabela de preços indisponível';
@@ -865,38 +880,58 @@ function precosDaFolha(rows, fornecedor){
   return out;
 }
 
-function popularSeletorFornecedores(){
-  const sel = $('fornecedorSel'); if (!sel) return;
-  const opcoes = fornecedores.map(n => '<option' + (n === fornecedorAtivo ? ' selected' : '') + '>' + esc(n) + '</option>');
-  opcoes.push('<option value="*"' + (fornecedorAtivo === '*' ? ' selected' : '') + '>— Todos os fornecedores —</option>');
-  sel.innerHTML = opcoes.join('');
+function actualizarChipPrecos(){
+  const chip = $('precosChip'), txt = $('precosTexto');
+  if (!chip || !txt || !precosInfo) return;
+  chip.className = 'ok';
+  const ativos = precosFiltrados().length;
+  const todos = ACTIVE_SHEETS.size === fornecedores.length;
+  txt.textContent = todos
+    ? precos.length.toLocaleString('pt-PT') + ' artigos · ' + fornecedores.length + ' fornecedores'
+    : ativos.toLocaleString('pt-PT') + ' artigos · ' + ACTIVE_SHEETS.size + ' de ' + fornecedores.length + ' fornecedores';
 }
 
-/* Troca a folha/fornecedor ativo e repopula a tabela de pesquisa a partir do ficheiro em memória */
-function aplicarFornecedor(nome){
-  if (!wbPrecos) return;
-  fornecedorAtivo = nome;
-  const sel = $('fornecedorSel'); if (sel && sel.value !== nome) sel.value = nome;
-  const ws = wbPrecos.Sheets[nome];
-  let lista = [];
+/* artigos dos fornecedores atualmente ativos */
+function precosFiltrados(){
+  if (ACTIVE_SHEETS.size === fornecedores.length) return precos;
+  return precos.filter(a => ACTIVE_SHEETS.has(a.f));
+}
+
+/* contagem de artigos por fornecedor */
+function contagemPorFornecedor(){
+  const m = {};
+  for (const a of precos) m[a.f] = (m[a.f] || 0) + 1;
+  return m;
+}
+
+function construirChipsFornecedor(){
+  const box = $('fornChips'); if (!box) return;
+  const cont = contagemPorFornecedor();
+  const todos = ACTIVE_SHEETS.size === fornecedores.length;
+  let html = '<button type="button" class="forn-chip' + (todos ? ' on' : '') + '" data-forn="*" onclick="toggleFornecedor(\'*\')">Todos</button>';
+  for (const n of fornecedores) {
+    const on = ACTIVE_SHEETS.has(n);
+    html += '<button type="button" class="forn-chip' + (on ? ' on' : '') + '" data-forn="' + esc(n) + '" onclick="toggleFornecedor(this.dataset.forn)">' +
+      esc(n) + ' <span class="forn-n">' + (cont[n] || 0).toLocaleString('pt-PT') + '</span></button>';
+  }
+  box.innerHTML = html;
+}
+
+function toggleFornecedor(nome){
   if (nome === '*') {
-    for (const fn of fornecedores) {
-      const w = wbPrecos.Sheets[fn]; if (!w) continue;
-      lista = lista.concat(precosDaFolha(XLSX.utils.sheet_to_json(w, { header:1, defval:null }), fn));
-    }
+    // se já estão todos, isto não faz nada; senão ativa todos
+    ACTIVE_SHEETS = new Set(fornecedores);
   } else {
-    lista = ws ? precosDaFolha(XLSX.utils.sheet_to_json(ws, { header:1, defval:null }), nome) : [];
+    if (ACTIVE_SHEETS.has(nome)) {
+      if (ACTIVE_SHEETS.size > 1) ACTIVE_SHEETS.delete(nome); // manter pelo menos 1
+    } else {
+      ACTIVE_SHEETS.add(nome);
+    }
   }
-  precos = lista;
-  precosInfo = { n: precos.length, quando: new Date() };
-  IDF = null; precosTok = null;  // forçar reconstrução do índice de pesquisa
-  const chip = $('precosChip'), txt = $('precosTexto');
-  if (chip && txt) {
-    chip.className = 'ok';
-    const etiqueta = nome === '*' ? 'todos os fornecedores' : nome;
-    txt.textContent = precos.length.toLocaleString('pt-PT') + ' artigos · ' + etiqueta;
-  }
+  construirChipsFornecedor();
+  actualizarChipPrecos();
   if ($('pesquisaPrecos') && $('pesquisaPrecos').value) renderResultados();
+  if (typeof pmIdx !== 'undefined' && pmIdx > -1) pmRecalcular();
 }
 
 /* pesquisa */
@@ -921,12 +956,13 @@ function renderResultados(){
   const termos = q.split(/\s+/).filter(Boolean);
   const res = [];
   for (const a of precos) {
+    if (!ACTIVE_SHEETS.has(a.f)) continue;
     let ok = true;
     for (const t of termos) if (!a.dn.includes(t) && !norm(a.c).includes(t)) { ok = false; break; }
     if (ok) { res.push(a); if (res.length >= 60) break; }
   }
   box.innerHTML = res.length
-    ? res.map((a, i) => '<div class="resultado" data-i="' + i + '"><span class="desc">' + esc(a.d) + '</span>' + (fornecedorAtivo === '*' && a.f ? '<span class="forn">' + esc(a.f) + '</span>' : '') + '<span class="un">' + esc(a.u) + '</span><span class="preco">' + fmtEur(a.p) + '</span></div>').join('')
+    ? res.map((a, i) => '<div class="resultado" data-i="' + i + '"><span class="desc">' + esc(a.d) + '</span><span class="forn">' + esc(a.f || '') + '</span><span class="un">' + esc(a.u) + '</span><span class="preco">' + fmtEur(a.p) + '</span></div>').join('')
     : '<div class="resultado-nota">Sem resultados para «' + esc($('pesquisaPrecos').value) + '».</div>';
   box._res = res;
   box.classList.add('aberto');
@@ -1762,6 +1798,7 @@ function searchPrecos(query, topN){
   const qSet = new Set(qk);
   const out = [];
   for (let j = 0; j < precos.length; j++) {
+    if (!ACTIVE_SHEETS.has(precos[j].f)) continue;
     const ts = precosTok[j];
     if (!ts.length) continue;
     const set = new Set(ts);
@@ -1791,7 +1828,7 @@ function pmRecalcular(){
       const cls = pct >= 80 ? 'alto' : (pct >= 50 ? 'medio' : 'baixo');
       return '<div class="pm-item" onclick="aplicarMatch(' + r[1] + ')">' +
         '<span class="pm-badge ' + cls + '">' + pct + '%</span>' +
-        '<span class="pm-desc">' + esc(a.d) + '<div class="pm-meta">' + esc(a.u || '—') + (a.c ? ' · ' + esc(a.c) : '') + '</div></span>' +
+        '<span class="pm-desc">' + esc(a.d) + '<div class="pm-meta">' + esc(a.f || '') + ' · ' + esc(a.u || '—') + (a.c ? ' · ' + esc(a.c) : '') + '</div></span>' +
         '<span class="pm-preco">' + fmtEur(a.p) + '</span>' +
         '</div>';
     }).join('') : '<div style="padding:16px;color:var(--cinza)">Nada encontrado — tenta menos palavras ou sinónimos.</div>';
