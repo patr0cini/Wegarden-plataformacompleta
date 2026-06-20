@@ -241,6 +241,9 @@ footer{
 .pm-topo b{font-size:15px}
 .pm-alvo{padding:10px 16px;font-size:12.5px;color:var(--cinza);border-bottom:1px solid #f0f0f0;line-height:1.4}
 .painel-match > input{margin:10px 16px 6px;padding:8px 10px;border:1px solid #ccc;border-radius:8px;font-size:13px}
+.pm-forn-chips{display:flex;gap:5px;flex-wrap:wrap;padding:10px 16px 0}
+.pm-forn-chips .forn-chip{padding:3px 9px;font-size:11.5px}
+.pm-forn-chips .forn-chip .forn-n{font-size:10px}
 .pm-lista{flex:1;overflow:auto;padding:0 8px 16px}
 .pm-item{display:flex;gap:10px;align-items:flex-start;padding:10px;border-radius:8px;cursor:pointer;border-bottom:1px solid #f3f3f3}
 .pm-item:hover{background:#f5f7f4}
@@ -423,10 +426,6 @@ th .si{opacity:.45;font-size:10px}
       </div>
 
       <div class="pesquisa-wrap">
-        <div class="forn-bar">
-          <span class="forn-lbl">Fornecedores:</span>
-          <div id="fornChips" class="forn-chips"></div>
-        </div>
         <input type="text" id="pesquisaPrecos" placeholder="Pesquisar artigo na tabela de preços…  (ex: acer, relva, mão de obra)" autocomplete="off">
         <div id="resultadosPrecos"></div>
       </div>
@@ -516,6 +515,7 @@ th .si{opacity:.45;font-size:10px}
     <button class="btn ghost mini" onclick="fecharMatching()">✕ Fechar</button>
   </div>
   <div class="pm-alvo" id="pmAlvo"></div>
+  <div id="fornChips" class="forn-chips pm-forn-chips"></div>
   <input type="text" id="pmPesquisa" placeholder="Afinar a pesquisa…" autocomplete="off" oninput="pmRecalcular()">
   <div class="pm-lista" id="pmLista"></div>
 </aside>
@@ -1747,6 +1747,7 @@ function abrirMatching(i){
   $('pmAlvo').innerHTML = '<b>' + esc(l.num || '') + '</b> ' + esc(l.descricao || '(sem descrição)');
   $('pmPesquisa').value = l.descricao || '';
   $('painelMatch').hidden = false;
+  construirChipsFornecedor();
   marcarLinhaAtiva();
   pmRecalcular();
 }
