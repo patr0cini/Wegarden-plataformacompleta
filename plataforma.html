@@ -470,6 +470,10 @@ th .si{opacity:.45;font-size:10px}
     </div>
     <div class="filtros">
       <input type="text" id="histPesquisa" placeholder="Pesquisar código, obra, requerente…" oninput="renderHistorico()">
+      <select id="histAno" onchange="renderHistorico()">
+        <option value="">Todos os anos</option>
+        <option>2026</option><option>2025</option><option>2024</option>
+      </select>
       <select id="histFonte" onchange="renderHistorico()">
         <option value="">Todas as fontes</option>
         <option>Plataforma</option><option>SharePoint</option><option>2026</option><option>2025</option><option>2024</option>
@@ -2890,8 +2894,19 @@ function histSort(col){
   renderHistorico();
 }
 
+/* Ano real de um registo do histórico:
+   - histórico antigo → a fonte é o ano ('2024'/'2025')
+   - Plataforma/SharePoint → extrai o ano da data (sortKey); por defeito 2026 */
+function anoDoRegisto(it){
+  if (/^20\d\d$/.test(it.fonte)) return it.fonte;
+  const m = String(it.sortKey || '').match(/(20\d\d)/);
+  if (m) return m[1];
+  return '2026';
+}
+
 function renderHistorico(){
   const q = norm($('histPesquisa').value);
+  const fa = $('histAno').value;
   const ff = $('histFonte').value;
   const fe = $('histEstado').value;
   const fr = $('histResp').value;
@@ -2950,6 +2965,7 @@ function renderHistorico(){
   selR.innerHTML = '<option value="">Todos os responsáveis</option>' + resps.map(r => '<option' + (r === atualR ? ' selected' : '') + '>' + esc(r) + '</option>').join('');
 
   let lista = tudoCompleto.filter(it => {
+    if (fa && anoDoRegisto(it) !== fa) return false;
     if (ff && it.fonte !== ff) return false;
     if (fe && it.estado !== fe) return false;
     if (fr && it.responsavel !== fr) return false;
