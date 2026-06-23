@@ -126,6 +126,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .chip.verde{background:var(--verde-suave);color:var(--verde)}
 .chip.verde-solido{background:var(--verde);color:#fff}
 .chip.erro{background:var(--erro-suave);color:var(--erro)}
+.chip.roxo{background:#EDE9FE;color:#6D28D9}
 .chip.terra{background:#F2E9DF;color:var(--terra)}
 
 .sel-mini{padding:4px 8px;font-size:12.5px;max-width:160px}
@@ -471,11 +472,11 @@ th .si{opacity:.45;font-size:10px}
       <input type="text" id="histPesquisa" placeholder="Pesquisar código, obra, requerente…" oninput="renderHistorico()">
       <select id="histFonte" onchange="renderHistorico()">
         <option value="">Todas as fontes</option>
-        <option>Plataforma</option><option>2026</option><option>2025</option><option>2024</option>
+        <option>Plataforma</option><option>SharePoint</option><option>2026</option><option>2025</option><option>2024</option>
       </select>
       <select id="histEstado" onchange="renderHistorico()">
-        <option value="">Enviados, adjudicados e perdidos</option>
-        <option>Enviado</option><option>Adjudicado</option><option>Perdido</option>
+        <option value="">Todos os estados</option>
+        <option>No SharePoint</option><option>Enviado</option><option>Adjudicado</option><option>Perdido</option>
       </select>
       <select id="histResp" onchange="renderHistorico()">
         <option value="">Todos os responsáveis</option>
@@ -742,6 +743,7 @@ const PIPELINE = { // pipeline existente — APENAS LEITURA, nunca escrever aqui
 };
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
+const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 
 /* ============================================================
    Estado global
@@ -1515,7 +1517,7 @@ async function carregarOrcamentos(){
 }
 
 function chipOrc(estado){
-  const m = { 'Rascunho':'cinza', 'Em revisão':'ambar', 'Enviado':'azul', 'Adjudicado':'verde-solido', 'Perdido':'erro' };
+  const m = { 'Rascunho':'cinza', 'Em revisão':'ambar', 'Enviado':'azul', 'Adjudicado':'verde-solido', 'Perdido':'erro', 'No SharePoint':'roxo' };
   return '<span class="chip ' + (m[estado] || 'cinza') + '">' + esc(estado || '—') + '</span>';
 }
 
@@ -2793,8 +2795,25 @@ const FONTES_ANTIGAS = [
   { fonte:'2024', url:'https://raw.githubusercontent.com/patr0cini/wegarden-orcamentos-historico/main/data2024.json', api:'https://wegarden-orcamentos-historico.onrender.com/2024/data' }
 ];
 let historicoAntigo = [];
+let pastasSharePoint = [];   // pastas de obra 2026 sem orçamento ainda (estado "No SharePoint")
 let histOrd = { col:'sortKey', asc:false };
 let histLista = [], histEditIdx = -1;
+
+/* Carrega as pastas de obra de 2026 do SharePoint (análise automática:
+   as que ainda não têm orçamento aparecem no histórico como "No SharePoint") */
+async function carregarPastasSharePoint(){
+  try {
+    const r = await fetch(FN_SPFICH + '?acao=pastas2026', { headers: { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.message || 'erro');
+    pastasSharePoint = Array.isArray(j.pastas) ? j.pastas : [];
+  } catch (e) {
+    pastasSharePoint = [];
+    console.warn('Pastas SharePoint indisponíveis:', e.message);
+  }
+  renderHistorico();
+}
 
 /* Grau de interesse — mesma fórmula da plataforma 2025 */
 function calcGrau(valor, concurso, dataArranque, override){
@@ -2895,12 +2914,42 @@ function renderHistorico(){
 
   const tudo = novos.concat(historicoAntigo);
 
+  // ===== Análise automática: pastas no SharePoint ainda sem orçamento =====
+  // Reúne todos os códigos ocWG26_NNN que JÁ têm orçamento (em qualquer fonte),
+  // seja pelo código do registo, seja pelo código embebido no sharepoint_url do pedido.
+  const codigosComOrcamento = new Set();
+  const addCod = v => { const m = String(v || '').match(/ocWG\d{2}_\d{3}/); if (m) codigosComOrcamento.add(m[0]); };
+  tudo.forEach(it => { addCod(it.codigo); });
+  orcamentos.forEach(o => { addCod(o.id); addCod(o.pedido_id); });
+  pedidos.forEach(p => { addCod(p.codigo); addCod(p.sharepoint_url); });
+
+  const virtuaisSP = pastasSharePoint
+    .filter(pp => !codigosComOrcamento.has(pp.codigo))
+    .map(pp => ({
+      fonte: 'SharePoint',
+      codigo: pp.codigo,
+      obra: pp.obra || pp.nome || '',
+      cliente: '',
+      responsavel: '',
+      total: 0,
+      dataTxt: 'Orçamento em Desenvolvimento',
+      sortKey: pp.modificado || pp.criado || '9999',  // ordenar para o topo por defeito (desc)
+      estado: 'No SharePoint',
+      followups: [],
+      grauData: { valor: 0, concurso: '', dataArranque: '', override: '' },
+      antigo: false, soSharePoint: true,
+      webUrl: pp.webUrl, drive: pp.drive, item: pp.item,
+      raw: pp
+    }));
+
+  const tudoCompleto = tudo.concat(virtuaisSP);
+
   // popular filtro de responsáveis preservando a selecção
   const selR = $('histResp'), atualR = selR.value;
-  const resps = [...new Set(tudo.map(t => t.responsavel).filter(Boolean))].sort((a,b) => a.localeCompare(b,'pt'));
+  const resps = [...new Set(tudoCompleto.map(t => t.responsavel).filter(Boolean))].sort((a,b) => a.localeCompare(b,'pt'));
   selR.innerHTML = '<option value="">Todos os responsáveis</option>' + resps.map(r => '<option' + (r === atualR ? ' selected' : '') + '>' + esc(r) + '</option>').join('');
 
-  let lista = tudo.filter(it => {
+  let lista = tudoCompleto.filter(it => {
     if (ff && it.fonte !== ff) return false;
     if (fe && it.estado !== fe) return false;
     if (fr && it.responsavel !== fr) return false;
@@ -2920,9 +2969,12 @@ function renderHistorico(){
 
   histLista = lista;
   $('histCorpo').innerHTML = lista.length ? lista.map((it, idx) => {
-    const fonteChip = '<span class="chip ' + (it.antigo ? 'cinza' : 'verde') + '">' + esc(it.fonte) + '</span>';
+    const fonteChip = '<span class="chip ' + (it.antigo ? 'cinza' : (it.soSharePoint ? 'roxo' : 'verde')) + '">' + esc(it.fonte) + '</span>';
     const nFu = it.followups.length;
-    return '<tr class="clicavel-linha" onclick="abrirHistEdit(' + idx + ')" title="Clica para ver e editar">' +
+    const aoClicar = it.soSharePoint
+      ? 'onclick="abrirPastaHist(' + idx + ')" title="Abrir pasta no SharePoint"'
+      : 'onclick="abrirHistEdit(' + idx + ')" title="Clica para ver e editar"';
+    return '<tr class="clicavel-linha" ' + aoClicar + '>' +
       '<td><b>' + esc(it.codigo) + '</b></td>' +
       '<td>' + fonteChip + '</td>' +
       '<td title="' + esc(it.obra) + '">' + esc(it.obra.length > 48 ? it.obra.slice(0,47) + '…' : (it.obra || '—')) + '</td>' +
@@ -2936,6 +2988,13 @@ function renderHistorico(){
       '</tr>';
   }).join('') : '<tr><td colspan="10" class="vazio">Nada encontrado com estes filtros.</td></tr>';
   fuAtualizarBadge();
+}
+
+/* Abre a pasta SharePoint de um registo "No SharePoint" */
+function abrirPastaHist(idx){
+  const it = histLista[idx]; if (!it) return;
+  if (it.webUrl) window.open(it.webUrl, '_blank');
+  else toast('Sem link de pasta para este item.', 'erro');
 }
 
 /* ===== Edição (clique na linha) ===== */
@@ -3189,6 +3248,7 @@ carregarPrecos();
 carregarPedidos();
 carregarOrcamentos();
 carregarHistoricoAntigo();
+carregarPastasSharePoint();
 </script>
 </body>
 </html>
