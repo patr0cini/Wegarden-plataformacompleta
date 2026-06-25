@@ -741,7 +741,7 @@ const NOVO = { // projecto Supabase desta plataforma (leitura + escrita)
   url: 'https://kgpwpzluqnekqckltkys.supabase.co',
   key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtncHdwemx1cW5la3Fja2x0a3lzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNTg1NzcsImV4cCI6MjA5NDkzNDU3N30.pno5YwPb1z2dphWX00eenX1t2aDCbrFO6l1Knk7uyhI'
 };
-const PIPELINE = { // pipeline existente — APENAS LEITURA, nunca escrever aqui
+const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsável, pasta, apagar)
   url: 'https://swouvxexiuiqeljnvprl.supabase.co',
   key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN3b3V2eGV4aXVpcWVsam52cHJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxODkwMjYsImV4cCI6MjA5NDc2NTAyNn0.ChhwsF8hzmTNUADDFk8MDDbtSDZnvw0R87ZL5TQOYy8'
 };
@@ -1039,6 +1039,26 @@ async function mudarRespPedido(id, valor){
     toast('Responsável actualizado na pipeline');
     renderPipeline();
   } catch (e) { toast('Erro ao actualizar responsável: ' + e.message, 'erro'); renderPipeline(); }
+}
+
+/* Apaga um pedido da pipeline. Destrutivo e irreversível — pede confirmação. */
+async function apagarPedido(id){
+  const p = pedidos.find(x => String(x.id) === String(id));
+  if (!p) return;
+  const nome = p.pedido || '(sem descrição)';
+  const aviso = 'Apagar este pedido da pipeline?\n\n'
+    + '• ' + (p.codigo ? p.codigo + ' — ' : '') + nome + '\n'
+    + (p.remetente ? '• ' + p.remetente + '\n' : '')
+    + (p.localizacao && p.localizacao !== '—' ? '• ' + p.localizacao + '\n' : '')
+    + '\nEsta acção é irreversível.'
+    + (p.sharepoint_url ? '\n\nNota: a pasta no SharePoint NÃO é apagada — só o registo na pipeline.' : '');
+  if (!confirm(aviso)) return;
+  try {
+    await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(id), { method:'DELETE', headers:{ 'Prefer':'return=minimal' } });
+    pedidos = pedidos.filter(x => String(x.id) !== String(id));
+    toast('Pedido apagado da pipeline');
+    renderPipeline();
+  } catch (e) { toast('Erro ao apagar: ' + e.message, 'erro'); }
 }
 
 async function emailPedido(pid, win){
@@ -1404,6 +1424,7 @@ function renderPipeline(){
         : '<a href="#" onclick="criarPastaPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Criar pasta no SharePoint (2026)" style="text-decoration:none">📂⁺</a> ') +
       '<a href="#" onclick="emailPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\', window.open(\'\',\'_blank\')); return false" title="Abrir o email original no Outlook" style="text-decoration:none">✉️</a>' +
       (p.sharepoint_url ? ' <a href="#" onclick="arquivarEmail(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Arquivar o email e anexos na pasta" style="text-decoration:none">📥</a>' : '') +
+      ' <a href="#" onclick="apagarPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Apagar este pedido da pipeline" style="text-decoration:none">🗑️</a>' +
     '</td>' +
     '<td><button class="btn ghost mini" onclick="orcamentarPedido(\'' + esc(p.id).replace(/'/g, "\\'") + '\')">Orçamentar →</button></td>' +
     '</tr>'
