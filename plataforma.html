@@ -2910,20 +2910,35 @@ function grauChip(g){
 }
 
 async function carregarHistoricoAntigo(){
-  const falhas = [];
-  const res = await Promise.allSettled(FONTES_ANTIGAS.map(async f => {
-    const r = await fetch(f.url, { cache: 'no-store' });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    let j = await r.json();
-    if (f.embrulhado) j = j.data || [];
-    return (Array.isArray(j) ? j : []).map(rec => normalizarAntigo(f.fonte, rec));
-  }));
-  historicoAntigo = [];
-  res.forEach((r, i) => {
-    if (r.status === 'fulfilled') historicoAntigo = historicoAntigo.concat(r.value);
-    else falhas.push(FONTES_ANTIGAS[i].fonte);
-  });
-  if (falhas.length) toast('Histórico indisponível: ' + falhas.join(', '), 'erro');
+  try {
+    const linhas = await db(NOVO, 'historico?select=*&order=ano.desc,legado_id.asc') || [];
+    // mapear os campos da tabela para o formato que normalizarAntigo espera
+    historicoAntigo = linhas.map(row => {
+      const rec = {
+        id: row.id,                    // id real da tabela (para gravar)
+        legadoId: row.legado_id,
+        nome: row.nome || '',
+        valor: row.valor,
+        mes: row.mes || '',
+        requerente: row.requerente || '',
+        responsavel: row.responsavel || '',
+        concurso: row.concurso || '',
+        visita: row.visita || '',
+        adjudicado: row.adjudicado || '',
+        dataArranque: row.data_arranque || '',
+        emailEnvio: row.email_envio || '',
+        dataEnvio: row.data_envio || '',
+        grauOverride: row.grau_override || '',
+        notas: row.notas || '',
+        notasHist: row.notas_hist || [],
+        lembretes: row.lembretes || []
+      };
+      return normalizarAntigo(String(row.ano), rec);
+    });
+  } catch (e) {
+    historicoAntigo = [];
+    toast('Histórico indisponível: ' + e.message, 'erro');
+  }
   renderHistorico();
 }
 
@@ -3234,33 +3249,71 @@ async function histGuardar(){
 }
 
 async function histGravarAntigo(f, idOrig, mud){
-  const fonte = FONTES_ANTIGAS.find(x => x.fonte === f);
-  const r = await fetch(fonte.api, { cache:'no-store' });
-  if (!r.ok) throw new Error('não consegui ler os dados actuais de ' + f + ' (HTTP ' + r.status + ')');
-  const j = await r.json();
-  const arr = Array.isArray(j) ? j : (j.data || []);
-  const i = arr.findIndex(x => x.id === idOrig);
-  if (i < 0) throw new Error('registo #' + idOrig + ' não encontrado em ' + f);
-  arr[i] = { ...arr[i], ...mud };
-  const w = await fetch(fonte.api, { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ data: arr }) });
-  if (!w.ok) throw new Error('o servidor de ' + f + ' recusou a gravação (HTTP ' + w.status + ')');
-  return arr[i];
+  // grava na tabela historico do Supabase (idOrig é o id real da linha)
+  const corpo = {};
+  if ('nome' in mud) corpo.nome = mud.nome;
+  if ('valor' in mud) corpo.valor = mud.valor;
+  if ('requerente' in mud) corpo.requerente = mud.requerente;
+  if ('responsavel' in mud) corpo.responsavel = mud.responsavel;
+  if ('adjudicado' in mud) corpo.adjudicado = mud.adjudicado;
+  if ('concurso' in mud) corpo.concurso = mud.concurso;
+  if ('visita' in mud) corpo.visita = mud.visita;
+  if ('dataEnvio' in mud) corpo.data_envio = mud.dataEnvio;
+  if ('dataArranque' in mud) corpo.data_arranque = mud.dataArranque;
+  if ('grauOverride' in mud) corpo.grau_override = mud.grauOverride;
+  if ('notasHist' in mud) corpo.notas_hist = mud.notasHist;
+  if ('lembretes' in mud) corpo.lembretes = mud.lembretes;
+  corpo.atualizado_em = new Date().toISOString();
+
+  await db(NOVO, 'historico?id=eq.' + encodeURIComponent(idOrig), {
+    method: 'PATCH', headers: { 'Prefer': 'return=representation' }, body: JSON.stringify(corpo)
+  });
+  // devolver o registo no formato antigo (para normalizarAntigo)
+  const r = await db(NOVO, 'historico?id=eq.' + encodeURIComponent(idOrig) + '&select=*');
+  const row = Array.isArray(r) ? r[0] : r;
+  return {
+    id: row.id, nome: row.nome || '', valor: row.valor, mes: row.mes || '',
+    requerente: row.requerente || '', responsavel: row.responsavel || '',
+    concurso: row.concurso || '', visita: row.visita || '', adjudicado: row.adjudicado || '',
+    dataArranque: row.data_arranque || '', emailEnvio: row.email_envio || '',
+    dataEnvio: row.data_envio || '', grauOverride: row.grau_override || '',
+    notas: row.notas || '', notasHist: row.notas_hist || [], lembretes: row.lembretes || []
+  };
 }
 
-/* Cria um registo NOVO no histórico de 2026 (usado quando se preenche um "No SharePoint").
-   Lê o array actual, gera id = MAX+1, insere e grava via PUT. Devolve o registo criado. */
+/* Cria um registo NOVO no histórico (usado quando se preenche um "No SharePoint").
+   Insere na tabela historico do Supabase com ano 2026. Devolve o registo criado. */
 async function histCriarNovo2026(novo){
-  const fonte = FONTES_ANTIGAS.find(x => x.fonte === '2026');
-  const r = await fetch(fonte.api, { cache:'no-store' });
-  if (!r.ok) throw new Error('não consegui ler o histórico de 2026 (HTTP ' + r.status + ')');
-  const j = await r.json();
-  const arr = Array.isArray(j) ? j : (j.data || []);
-  const novoId = arr.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0) + 1;
-  const registo = { id: novoId, ...novo };
-  arr.push(registo);
-  const w = await fetch(fonte.api, { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ data: arr }) });
-  if (!w.ok) throw new Error('o servidor de 2026 recusou a gravação (HTTP ' + w.status + ')');
-  return registo;
+  const corpo = {
+    ano: 2026,
+    nome: novo.nome || '',
+    valor: (novo.valor === '' || novo.valor == null) ? null : Number(novo.valor),
+    mes: novo.mes || '',
+    requerente: novo.requerente || '',
+    responsavel: novo.responsavel || '',
+    concurso: novo.concurso || '',
+    visita: novo.visita || '',
+    adjudicado: novo.adjudicado || '',
+    data_arranque: novo.dataArranque || '',
+    email_envio: novo.emailEnvio || '',
+    data_envio: novo.dataEnvio || '',
+    grau_override: novo.grauOverride || '',
+    notas: novo.notas || '',
+    notas_hist: novo.notasHist || [],
+    lembretes: novo.lembretes || []
+  };
+  const r = await db(NOVO, 'historico', {
+    method: 'POST', headers: { 'Prefer': 'return=representation' }, body: JSON.stringify(corpo)
+  });
+  const row = Array.isArray(r) ? r[0] : r;
+  return {
+    id: row.id, nome: row.nome || '', valor: row.valor, mes: row.mes || '',
+    requerente: row.requerente || '', responsavel: row.responsavel || '',
+    concurso: row.concurso || '', visita: row.visita || '', adjudicado: row.adjudicado || '',
+    dataArranque: row.data_arranque || '', emailEnvio: row.email_envio || '',
+    dataEnvio: row.data_envio || '', grauOverride: row.grau_override || '',
+    notas: row.notas || '', notasHist: row.notas_hist || [], lembretes: row.lembretes || []
+  };
 }
 
 /* ============================================================
