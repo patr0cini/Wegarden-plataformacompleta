@@ -1076,7 +1076,7 @@ async function apagarPedido(id){
   if (!p) return;
   const nome = p.pedido || '(sem descrição)';
   const aviso = 'Apagar este pedido da pipeline?\n\n'
-    + '• ' + (p.codigo ? p.codigo + ' — ' : '') + nome + '\n'
+    + '• ' + (codigoDaPasta(p.sharepoint_url) ? codigoDaPasta(p.sharepoint_url) + ' — ' : '') + nome + '\n'
     + (p.remetente ? '• ' + p.remetente + '\n' : '')
     + (p.localizacao && p.localizacao !== '—' ? '• ' + p.localizacao + '\n' : '')
     + '\nEsta acção é irreversível.'
@@ -1182,10 +1182,11 @@ async function criarPastaPedido(pid){
       return;
     }
   }
-  // sugerir o próximo código a partir do que já existe no SharePoint (2026)
-  let sugestaoCodigo = p.codigo || '';
+  // sugerir o próximo código a partir do que já existe no SharePoint (2026).
+  // O código vem sempre do SharePoint — o campo 'codigo' da pipeline foi descontinuado.
+  let sugestaoCodigo = '';
   let avisoCodigo = '';
-  if (!p.codigo) {
+  {
     toast('A verificar o último código em 2026…');
     try {
       const prox = await proximoCodigo2026();
@@ -1446,12 +1447,12 @@ function renderPipeline(){
   const lista = pedidos.filter(p => {
     if (fe && p.estado !== fe) return false;
     if (!q) return true;
-    return norm([p.pedido, p.remetente, p.localizacao, p.codigo, p.tipo].join(' ')).includes(q);
+    return norm([p.pedido, p.remetente, p.localizacao, codigoDaPasta(p.sharepoint_url), p.tipo].join(' ')).includes(q);
   });
   $('pipCorpo').innerHTML = lista.length ? lista.map(p =>
     '<tr>' +
     '<td>' + fmtData(p.data) + '</td>' +
-    '<td>' + esc(p.codigo || '—') + '</td>' +
+    '<td>' + esc(codigoDaPasta(p.sharepoint_url) || '—') + '</td>' +
     '<td>' + esc(p.pedido || '—') + '</td>' +
     '<td>' + esc(p.remetente || '—') + '</td>' +
     '<td>' + esc(p.localizacao || '—') + '</td>' +
@@ -1484,8 +1485,8 @@ function codigoDaPasta(url){
 async function orcamentarPedido(pid){
   const p = pedidos.find(x => String(x.id) === String(pid));
   if (!p) return;
-  // código efetivo: o da pipeline ou, se vazio, o que está no nome da pasta já criada
-  const codigoEfetivo = p.codigo || codigoDaPasta(p.sharepoint_url);
+  // código efetivo: deriva sempre do nome da pasta SharePoint (não do campo codigo, descontinuado)
+  const codigoEfetivo = codigoDaPasta(p.sharepoint_url);
   // se já existe um orçamento com este código, abre-o
   if (codigoEfetivo) {
     const existente = orcamentos.find(o => o.id === codigoEfetivo);
@@ -2995,9 +2996,11 @@ function renderHistorico(){
   // seja pelo código do registo, seja pelo código embebido no sharepoint_url do pedido.
   const codigosComOrcamento = new Set();
   const addCod = v => { const m = String(v || '').match(/ocWG\d{2}_\d{3}/); if (m) codigosComOrcamento.add(m[0]); };
+  // O código de um pedido deriva SÓ da pasta SharePoint (sharepoint_url).
+  // O campo 'codigo' da pipeline foi descontinuado: só havia orçamento quando há pasta.
   tudo.forEach(it => { addCod(it.codigo); });
   orcamentos.forEach(o => { addCod(o.id); addCod(o.pedido_id); });
-  pedidos.forEach(p => { addCod(p.codigo); addCod(p.sharepoint_url); });
+  pedidos.forEach(p => { addCod(p.sharepoint_url); });
 
   const virtuaisSP = pastasSharePoint
     .filter(pp => !codigosComOrcamento.has(pp.codigo))
