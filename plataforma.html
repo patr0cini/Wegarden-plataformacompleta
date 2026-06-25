@@ -989,11 +989,40 @@ async function carregarPedidos(){
   try {
     pedidos = await db(PIPELINE, 'pedidos?select=id,ano,pedido,tipo,remetente,email,data,localizacao,estado,resp,codigo,sharepoint_url&order=data.desc.nullslast') || [];
     pipEstados = [...new Set(pedidos.map(p => p.estado).filter(Boolean))].sort();
+    if (!pipEstados.includes('No SharePoint')) pipEstados.push('No SharePoint');
     pipResps = [...new Set(pedidos.map(p => (p.resp || '').trim()).filter(Boolean))].sort();
     $('pipEstado').innerHTML = '<option value="">Todos os estados</option>' + pipEstados.map(e => '<option>' + esc(e) + '</option>').join('');
     renderPipeline();
+    reconciliarNoSharePoint();  // marca "No SharePoint" os que já têm pasta mas ainda estão "Não iniciado"
   } catch (e) {
     $('pipCorpo').innerHTML = '<tr><td colspan="10" class="vazio">Não foi possível ler a pipeline — ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+/* Reconciliação: pedidos que JÁ têm pasta no SharePoint mas cujo estado ainda não o reflecte.
+   Só promove os que estão "Não iniciado"/"Novo"/vazio — preserva estados de trabalho
+   (Em análise, Proposta enviada, Fora de Zona, etc.). Corre sempre que a pipeline carrega,
+   por isso apanha também pastas criadas por fora da plataforma. */
+async function reconciliarNoSharePoint(){
+  const promovivel = e => !e || e === 'Não iniciado' || e === 'Novo';
+  const aPromover = pedidos.filter(p => p.sharepoint_url && promovivel(p.estado));
+  if (!aPromover.length) return;
+  let feitos = 0;
+  for (const p of aPromover) {
+    try {
+      await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(p.id), {
+        method: 'PATCH', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify({ estado: 'No SharePoint' })
+      });
+      p.estado = 'No SharePoint';
+      feitos++;
+    } catch (_) { /* se um falhar, segue para os outros */ }
+  }
+  if (feitos) {
+    if (!pipEstados.includes('No SharePoint')) {
+      pipEstados.push('No SharePoint'); pipEstados.sort();
+      $('pipEstado').innerHTML = '<option value="">Todos os estados</option>' + pipEstados.map(e => '<option>' + esc(e) + '</option>').join('');
+    }
+    renderPipeline();
   }
 }
 
@@ -1078,7 +1107,7 @@ async function emailPedido(pid, win){
 }
 
 function chipPedido(estado){
-  const m = { 'Em análise':'ambar', 'Proposta enviada':'azul', 'Não iniciado':'cinza', 'Fora de Zona':'terra' };
+  const m = { 'Em análise':'ambar', 'Proposta enviada':'azul', 'Não iniciado':'cinza', 'Fora de Zona':'terra', 'No SharePoint':'roxo' };
   return '<span class="chip ' + (m[estado] || 'cinza') + '">' + esc(estado || '—') + '</span>';
 }
 
@@ -1194,11 +1223,22 @@ async function criarPastaPedido(pid){
       } catch (_) { /* se já existir, segue */ }
     }
     const url = pasta.webUrl || (SP_BASE_URL_2026 + '/' + nome);
-    // gravar o link na pipeline para o 📁 passar a aparecer
+    // promover o estado para "No SharePoint" se o pedido ainda não tinha começado
+    const promoverEstado = !p.estado || p.estado === 'Não iniciado' || p.estado === 'Novo';
+    const corpoPatch = { sharepoint_url: url };
+    if (promoverEstado) corpoPatch.estado = 'No SharePoint';
+    // gravar o link (e o estado) na pipeline para o 📁 passar a aparecer
     await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(p.id), {
-      method: 'PATCH', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify({ sharepoint_url: url })
+      method: 'PATCH', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify(corpoPatch)
     });
     p.sharepoint_url = url;
+    if (promoverEstado) {
+      p.estado = 'No SharePoint';
+      if (!pipEstados.includes('No SharePoint')) {
+        pipEstados.push('No SharePoint');
+        $('pipEstado').innerHTML = '<option value="">Todos os estados</option>' + pipEstados.map(e => '<option>' + esc(e) + '</option>').join('');
+      }
+    }
     renderPipeline();
     toast('✓ Pasta criada: ' + nome);
   } catch (e) {
