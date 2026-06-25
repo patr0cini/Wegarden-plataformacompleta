@@ -112,6 +112,8 @@ td{padding:10px 14px;border-bottom:1px solid #EFEDE6;vertical-align:middle}
 tbody tr:last-child td{border-bottom:none}
 tbody tr.clicavel{cursor:pointer}
 tbody tr.clicavel:hover{background:#FAF9F4}
+tbody tr.linha-fora-zona td{opacity:.4;filter:saturate(.4)}
+tbody tr.linha-fora-zona:hover td{opacity:1;filter:saturate(1)}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .vazio{padding:48px 20px;text-align:center;color:var(--cinza);font-size:13.5px}
 
@@ -1450,7 +1452,7 @@ function renderPipeline(){
     return norm([p.pedido, p.remetente, p.localizacao, codigoDaPasta(p.sharepoint_url), p.tipo].join(' ')).includes(q);
   });
   $('pipCorpo').innerHTML = lista.length ? lista.map(p =>
-    '<tr>' +
+    '<tr' + (p.estado === 'Fora de Zona' ? ' class="linha-fora-zona"' : '') + '>' +
     '<td>' + fmtData(p.data) + '</td>' +
     '<td>' + esc(codigoDaPasta(p.sharepoint_url) || '—') + '</td>' +
     '<td>' + esc(p.pedido || '—') + '</td>' +
