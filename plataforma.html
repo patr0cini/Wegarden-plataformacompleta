@@ -1651,8 +1651,15 @@ async function abrirOrcamento(id){
     atual = {
       novo: false,
       header: hs[0],
-      linhas: ls.map(l => ({ tipo: l.tipo || 'artigo', codigo: l.codigo_artigo, descricao: l.descricao, unidade: l.unidade || '', quantidade: Number(l.quantidade) || 0, preco_unitario: Number(l.preco_unitario) || 0 }))
+      linhas: ls.map(l => ({ tipo: l.tipo || 'artigo', codigo: l.codigo_artigo, descricao: l.descricao, unidade: l.unidade || '', quantidade: Number(l.quantidade) || 0, preco_unitario: Number(l.preco_unitario) || 0, _row: l.sp_row || undefined, _fromFile: !!l.sp_row }))
     };
+    // restaurar a ligação ao Excel original (origem + mapa de colunas), se existir,
+    // para que continuar este orçamento preencha o ficheiro original e não regenere
+    const spf = hs[0].sp_ficheiro;
+    if (spf && spf.origem && spf.fill) {
+      atual.spOrigem = spf.origem;
+      atual.spFill = spf.fill;
+    }
     abrirEditor();
   } catch (e) { toast('Erro ao abrir: ' + e.message, 'erro'); }
 }
@@ -2453,6 +2460,7 @@ async function guardarOrcamento(){
     cliente: h.cliente || null, email_cliente: h.email_cliente || null,
     localizacao: h.localizacao || null, estado: h.estado, total,
     notas: h.notas || null, data_envio: h.data_envio || null,
+    sp_ficheiro: (atual.spOrigem && atual.spFill) ? { origem: atual.spOrigem, fill: atual.spFill } : null,
     atualizado_em: new Date().toISOString()
   };
   try {
@@ -2468,7 +2476,8 @@ async function guardarOrcamento(){
         codigo_artigo: l.codigo || null, descricao: l.descricao || '',
         unidade: l.tipo === 'artigo' ? (l.unidade || null) : null,
         quantidade: l.tipo === 'artigo' ? (l.quantidade || 0) : 0,
-        preco_unitario: l.tipo === 'artigo' ? (l.preco_unitario || 0) : 0
+        preco_unitario: l.tipo === 'artigo' ? (l.preco_unitario || 0) : 0,
+        sp_row: (l.tipo === 'artigo' && l._row) ? l._row : null
       }));
       await db(NOVO, 'orcamentos_v2_linhas', { method: 'POST', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify(linhas) });
     }
