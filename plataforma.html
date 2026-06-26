@@ -477,8 +477,8 @@ th .si{opacity:.45;font-size:10px}
         <option>2026</option><option>2025</option><option>2024</option>
       </select>
       <select id="histFonte" onchange="renderHistorico()">
-        <option value="">Todas as fontes</option>
-        <option>Plataforma</option><option>SharePoint</option><option>2026</option><option>2025</option><option>2024</option>
+        <option value="">Todos os anos</option>
+        <option>2026</option><option>2025</option><option>2024</option>
       </select>
       <select id="histEstado" onchange="renderHistorico()">
         <option value="">Todos os estados</option>
@@ -2994,7 +2994,7 @@ function renderHistorico(){
   const novos = orcamentos
     .filter(o => ['Enviado','Adjudicado','Perdido'].includes(o.estado))
     .map(o => ({
-      fonte:'Plataforma', codigo:o.id, obra:o.nome_obra || '', cliente:o.cliente || '',
+      fonte:'2026', codigo:o.id, obra:o.nome_obra || '', cliente:o.cliente || '',
       responsavel: o.responsavel || '',
       total:Number(o.total) || 0,
       dataTxt: fmtData(o.data_envio),
@@ -3022,7 +3022,7 @@ function renderHistorico(){
   const virtuaisSP = pastasSharePoint
     .filter(pp => !codigosComOrcamento.has(pp.codigo))
     .map(pp => ({
-      fonte: 'SharePoint',
+      fonte: '2026',
       codigo: pp.codigo,
       obra: pp.obra || pp.nome || '',
       cliente: '',
@@ -3122,9 +3122,9 @@ function abrirHistEdit(idx){
   const comoAntigo = it.antigo || it.soSharePoint;
   const rr = (r && typeof r === 'object') ? r : {};
   const estadoCampo = comoAntigo
-    ? '<div><label>Adjudicado?</label><select id="hEstado">' +
+    ? '<div><label>Adjudicado?</label><select id="heEstado">' +
       ['','Sim','Não','Parcialmente'].map(v => '<option value="' + v + '"' + ((rr.adjudicado || '') === v ? ' selected' : '') + '>' + (v || 'Em aberto') + '</option>').join('') + '</select></div>'
-    : '<div><label>Estado</label><select id="hEstado">' +
+    : '<div><label>Estado</label><select id="heEstado">' +
       ['Enviado','Adjudicado','Perdido'].map(v => '<option' + (it.estado === v ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></div>';
   const dataEnvio = comoAntigo ? (rr.dataEnvio || '') : (rr.data_envio ? String(rr.data_envio).slice(0,10) : '');
   const arranque = comoAntigo ? (rr.dataArranque || '') : (rr.data_arranque || '');
@@ -3135,7 +3135,7 @@ function abrirHistEdit(idx){
   const resps = [...new Set(orcamentos.map(o => o.responsavel).concat(historicoAntigo.map(h => h.responsavel)).filter(Boolean))].sort();
   $('histCorpoEdit').innerHTML =
     '<div class="hist-form">' +
-      '<div class="full"><label>Obra</label><input id="hObra" value="' + esc(it.obra) + '"></div>' +
+      '<div class="full"><label>Obra</label><input id="heObra" value="' + esc(it.obra) + '"></div>' +
       '<div><label>Requerente</label><input id="hReq" value="' + esc(it.cliente) + '"></div>' +
       '<div><label>Responsável</label><input id="hResp" list="dlResp" value="' + esc(it.responsavel) + '"><datalist id="dlResp">' + resps.map(x => '<option>' + esc(x) + '</option>').join('') + '</datalist></div>' +
       '<div><label>Valor (€)</label><input id="hValor" type="number" step="0.01" value="' + (it.total || '') + '"' + (valorEditavel ? '' : ' disabled title="Na Plataforma o total vem das linhas do orçamento"') + '></div>' +
@@ -3161,13 +3161,13 @@ async function histGuardar(){
   try {
     if (it.soSharePoint) {
       // Pasta "No SharePoint" — criar um registo NOVO no histórico de 2026.
-      const obra = v('hObra').trim();
+      const obra = v('heObra').trim();
       const novo = {
         nome: it.codigo + (obra ? ' ' + obra : ''),
         valor: v('hValor') !== '' ? parseFloat(v('hValor')) : null,
         mes: '', requerente: v('hReq').trim(), responsavel: v('hResp').trim(),
         concurso: v('hConc'), visita: v('hVis'),
-        adjudicado: v('hEstado'), dataArranque: v('hArranque').trim(),
+        adjudicado: v('heEstado'), dataArranque: v('hArranque').trim(),
         notas: '', notasHist: [], emailEnvio: '',
         dataEnvio: v('hDataEnvio'), grauOverride: v('hGrau')
       };
@@ -3187,9 +3187,9 @@ async function histGuardar(){
     if (!it.antigo) {
       const o = it.raw;
       const corpo = {
-        nome_obra: v('hObra').trim(), cliente: v('hReq').trim(),
+        nome_obra: v('heObra').trim(), cliente: v('hReq').trim(),
         responsavel: v('hResp').trim() || null,
-        estado: v('hEstado'),
+        estado: v('heEstado'),
         concurso: v('hConc') || null, visita: v('hVis') || null,
         data_arranque: v('hArranque').trim() || null,
         grau_override: v('hGrau') || null,
@@ -3215,13 +3215,13 @@ async function histGuardar(){
       await carregarOrcamentos();
       renderHistorico();
     } else {
-      const obra = v('hObra').trim();
+      const obra = v('heObra').trim();
       const mud = {
         nome: it.codigo.startsWith('#') ? obra : (it.codigo + (obra ? ' ' + obra : '')),
         valor: v('hValor') !== '' ? parseFloat(v('hValor')) : null,
         requerente: v('hReq').trim(),
         responsavel: v('hResp').trim(),
-        adjudicado: v('hEstado'),
+        adjudicado: v('heEstado'),
         concurso: v('hConc'), visita: v('hVis'),
         dataEnvio: v('hDataEnvio'),
         dataArranque: v('hArranque').trim(),
