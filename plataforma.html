@@ -2964,6 +2964,20 @@ async function carregarHistoricoAntigo(){
   renderHistorico();
 }
 
+/* Converte os lembretes (follow-ups) de um registo em entradas para a lista
+   "Follow-ups e notas registadas" da obra. Cada follow-up vira a sua linha
+   principal SEGUIDA das notas internas que lhe foram acrescentadas, para o
+   histórico do follow-up aparecer também quando se abre a obra. */
+function lembretesParaFollowups(lembs){
+  return (Array.isArray(lembs) ? lembs : []).flatMap(l => {
+    const principal = { data: l.data, nota: 'Lembrete: ' + (l.texto || '') + (l.done ? ' ✓' : '') };
+    const notasInternas = (Array.isArray(l.notas) ? l.notas : []).map(n => ({
+      data: n.at, nota: '↳ ' + (n.texto || '')
+    }));
+    return [principal].concat(notasInternas);
+  });
+}
+
 function normalizarAntigo(fonte, rec){
   const nome = String(rec.nome || '');
   const m = nome.match(/^(ocWG\d{2}_\d{2,4}[A-Za-z]?)\s*(.*)$/);
@@ -2972,7 +2986,7 @@ function normalizarAntigo(fonte, rec){
   const followups = []
     .concat(rec.notas ? [{ data:null, nota: rec.notas }] : [])
     .concat((rec.notasHist || []).map(n => ({ data: n.at, nota: n.texto })))
-    .concat((rec.lembretes || []).map(l => ({ data: l.data, nota: 'Lembrete: ' + l.texto + (l.done ? ' ✓' : '') })));
+    .concat(lembretesParaFollowups(rec.lembretes));
   return {
     fonte,
     codigo: m ? m[1] : ('#' + rec.id),
@@ -3023,7 +3037,7 @@ function renderHistorico(){
       sortKey: o.data_envio || o.atualizado_em || '',
       estado:o.estado,
       followups: (Array.isArray(o.followups) ? o.followups : [])
-        .concat((Array.isArray(o.lembretes) ? o.lembretes : []).map(l => ({ data: l.data, nota: 'Lembrete: ' + l.texto + (l.done ? ' ✓' : '') }))),
+        .concat(lembretesParaFollowups(o.lembretes)),
       grauData: { valor: Number(o.total) || 0, concurso: o.concurso, dataArranque: o.data_arranque, override: o.grau_override || '' },
       antigo:false, raw:o
     }));
