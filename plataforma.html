@@ -2748,7 +2748,9 @@ function cmCancelar(){
 
 function cmConfirmar(){
   const st = CM_ESTADO; if (!st) return;
-  const folha = st.folhas[st.idx];
+  let folha = st.folhas[st.idx];
+  if (!folha) folha = st.folhas.find(f => f && f.hi !== null) || st.folhas[0];
+  if (!folha) { toast('Não consegui ler nenhuma folha do Excel.', 'erro'); $('cmOverlay').classList.remove('aberto'); CM_ESTADO = null; return; }
   const hi = parseInt($('cmLinhaCab').value,10);
   const ci = {
     n: parseInt($('cmRef').value,10),
@@ -2779,11 +2781,14 @@ async function importarExcel(file){
 function importarDoBuffer(wb, folha, hi, ci, preservar){
   if (!atual) return;
   try {
-    const nomeFolha = folha.name || folha.nome;
+    let nomeFolha = folha && (folha.name || folha.nome);
+    if (!nomeFolha || !wb.Sheets[nomeFolha]) nomeFolha = (wb.SheetNames || [])[0];
     const ws = wb.Sheets[nomeFolha];
+    if (!ws) { toast('Não encontrei a folha no Excel.', 'erro'); return; }
     const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
     const startRow = range.s.r, startCol = range.s.c;
-    const rows = folha.rows;
+    const rows = (folha && folha.rows) || XLSX.utils.sheet_to_json(ws, { header:1, defval:null });
+    if (!Number.isInteger(hi) || hi < 0 || hi >= rows.length) hi = (folha && folha.hi != null) ? folha.hi : 0;
 
     const novas = [];
     for (let i = hi + 1; i < rows.length; i++) {
