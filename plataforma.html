@@ -771,7 +771,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-03a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-04a'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -1016,7 +1016,7 @@ $('resultadosPrecos').addEventListener('click', e => {
    ============================================================ */
 async function carregarPedidos(){
   try {
-    pedidos = await db(PIPELINE, 'pedidos?select=id,ano,pedido,tipo,remetente,email,data,localizacao,estado,resp,codigo,sharepoint_url&order=data.desc.nullslast') || [];
+    pedidos = await db(PIPELINE, 'pedidos?select=id,ano,pedido,tipo,remetente,email,data,localizacao,estado,resp,codigo,sharepoint_url,associado_a&order=data.desc.nullslast') || [];
     pipEstados = [...new Set(pedidos.map(p => p.estado).filter(Boolean))].sort();
     if (!pipEstados.includes('No SharePoint')) pipEstados.push('No SharePoint');
     pipResps = [...new Set(pedidos.map(p => (p.resp || '').trim()).filter(Boolean))].sort();
@@ -1055,7 +1055,7 @@ async function reconciliarNoSharePoint(){
   }
 }
 
-let pipEstados = [], pipResps = [];
+let pipEstados = [], pipResps = [], pipAssocPor = {};
 
 function selEstadoPedido(p){
   const ops = (p.estado && !pipEstados.includes(p.estado)) ? [p.estado, ...pipEstados] : pipEstados;
@@ -1109,7 +1109,8 @@ async function apagarPedido(id){
     + (p.remetente ? '• ' + p.remetente + '\n' : '')
     + (p.localizacao && p.localizacao !== '—' ? '• ' + p.localizacao + '\n' : '')
     + '\nEsta acção é irreversível.'
-    + (p.sharepoint_url ? '\n\nNota: a pasta no SharePoint NÃO é apagada — só o registo na pipeline.' : '');
+    + (p.sharepoint_url ? '\n\nNota: a pasta no SharePoint NÃO é apagada — só o registo na pipeline.' : '')
+    + (pedidos.some(x => String(x.associado_a) === String(id)) ? '\n\nNota: os emails associados a este pedido voltam a aparecer como pedidos próprios.' : '');
   if (!confirm(aviso)) return;
   try {
     await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(id), { method:'DELETE', headers:{ 'Prefer':'return=minimal' } });
@@ -1117,6 +1118,104 @@ async function apagarPedido(id){
     toast('Pedido apagado da pipeline');
     renderPipeline();
   } catch (e) { toast('Erro ao apagar: ' + e.message, 'erro'); }
+}
+
+/* ============================================================
+   Associar pedidos duplicados (vários emails da mesma obra)
+   O pedido associado deixa de aparecer como linha própria e passa
+   a contar como email adicional do pedido principal. Reversível.
+   ============================================================ */
+let ASSOC = null; // pedido a associar (escolhido com 🔗 na linha)
+
+function associarPedido(pid){
+  const p = pedidos.find(x => String(x.id) === String(pid));
+  if (!p) return;
+  ASSOC = p;
+  $('emTitulo').textContent = '🔗 Associar a um pedido existente';
+  $('emCorpo').innerHTML =
+    '<div style="margin-bottom:10px;font-size:12.5px;color:var(--cinza)">O pedido <b>' + esc(p.pedido || '—') + '</b> (' + esc(p.remetente || '—') + ' · ' + fmtData(p.data) + ') passa a contar como email adicional do pedido que escolheres. Podes desfazer a qualquer momento no badge 🔗 do pedido principal.</div>' +
+    '<input id="assocPesquisa" placeholder="Procurar por obra, contacto, localização ou código…" oninput="assocRender()" style="width:100%;margin-bottom:8px;padding:7px 10px;border:1px solid var(--linha);border-radius:6px;font-size:13px">' +
+    '<div id="assocLista" style="max-height:50vh;overflow:auto"></div>';
+  $('emAcoes').innerHTML = '<button class="btn ghost" onclick="emFechar()">Cancelar</button>';
+  $('emailOverlay').classList.add('aberto');
+  assocRender();
+}
+
+/* Candidatos ordenados por semelhança: mesmo email/contacto primeiro, depois
+   sobreposição de palavras na descrição/localização */
+function assocCandidatos(){
+  const p = ASSOC;
+  const kwP = new Set(norm([p.pedido, p.localizacao].join(' ')).split(/\s+/).filter(w => w.length > 3));
+  return pedidos
+    .filter(x => String(x.id) !== String(p.id) && !x.associado_a)
+    .map(x => {
+      let score = 0;
+      if (p.email && x.email && norm(p.email) === norm(x.email)) score += 4;
+      if (p.remetente && x.remetente && norm(p.remetente) === norm(x.remetente)) score += 3;
+      score += norm([x.pedido, x.localizacao].join(' ')).split(/\s+/).filter(w => w.length > 3 && kwP.has(w)).length;
+      return { x, score };
+    });
+}
+
+function assocRender(){
+  if (!ASSOC) return;
+  const q = norm($('assocPesquisa').value);
+  let lista = assocCandidatos();
+  if (q) lista = lista.filter(({x}) => norm([x.pedido, x.remetente, x.localizacao, codigoDaPasta(x.sharepoint_url)].join(' ')).includes(q));
+  lista.sort((a, b) => b.score - a.score || String(b.x.data || '').localeCompare(String(a.x.data || '')));
+  lista = lista.slice(0, 30);
+  $('assocLista').innerHTML = lista.length ? lista.map(({x, score}) =>
+    '<div class="pm-item" onclick="assocEscolhido(\'' + esc(String(x.id)).replace(/'/g, "\\'") + '\')">' +
+      '<span>' + (score >= 3 ? '⭐' : '📄') + '</span><span class="pm-desc"><b>' + esc(codigoDaPasta(x.sharepoint_url) || '') + '</b> ' + esc(x.pedido || '—') +
+      '<div class="pm-meta">' + esc(x.remetente || '—') + ' · ' + fmtData(x.data) + (score >= 3 ? ' · <b>mesmo contacto</b>' : '') + '</div></span>' +
+    '</div>'
+  ).join('') : '<div style="padding:14px;color:var(--cinza);font-size:13px">Nenhum pedido encontrado com essa pesquisa.</div>';
+}
+
+async function assocEscolhido(alvoId){
+  const p = ASSOC;
+  if (!p) return;
+  try {
+    // se este pedido era principal de outros, os filhos passam para o novo principal
+    const filhos = pedidos.filter(x => String(x.associado_a) === String(p.id));
+    for (const f of filhos) {
+      await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(f.id), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify({ associado_a: alvoId }) });
+      f.associado_a = alvoId;
+    }
+    await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(p.id), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify({ associado_a: alvoId }) });
+    p.associado_a = alvoId;
+    ASSOC = null;
+    emFechar();
+    toast('Pedido associado — conta agora como email adicional 🔗');
+    renderPipeline();
+  } catch (e) { toast('Erro ao associar: ' + e.message, 'erro'); }
+}
+
+function verAssociados(pid){
+  const filhos = pedidos.filter(x => String(x.associado_a) === String(pid));
+  if (!filhos.length) return;
+  $('emTitulo').textContent = '🔗 Emails associados a esta obra';
+  $('emCorpo').innerHTML = filhos.map(f =>
+    '<div class="pm-item" style="cursor:default"><span>✉️</span><span class="pm-desc"><b>' + esc(f.pedido || '—') + '</b>' +
+      '<div class="pm-meta">' + esc(f.remetente || '—') + ' · ' + fmtData(f.data) + (f.localizacao && f.localizacao !== '—' ? ' · ' + esc(f.localizacao) : '') + '</div></span>' +
+      '<span style="white-space:nowrap">' +
+        '<button class="btn ghost mini" onclick="emailPedido(\'' + esc(String(f.id)).replace(/'/g, "\\'") + '\', window.open(\'\',\'_blank\'))">Abrir email</button> ' +
+        '<button class="btn ghost mini" onclick="desassociarPedido(\'' + esc(String(f.id)).replace(/'/g, "\\'") + '\')">Desassociar</button>' +
+      '</span></div>'
+  ).join('');
+  $('emAcoes').innerHTML = '<button class="btn ghost" onclick="emFechar()">Fechar</button>';
+  $('emailOverlay').classList.add('aberto');
+}
+
+async function desassociarPedido(pid){
+  try {
+    await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(pid), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify({ associado_a: null }) });
+    const p = pedidos.find(x => String(x.id) === String(pid));
+    if (p) p.associado_a = null;
+    emFechar();
+    toast('Pedido desassociado — volta a aparecer na pipeline.');
+    renderPipeline();
+  } catch (e) { toast('Erro ao desassociar: ' + e.message, 'erro'); }
 }
 
 async function emailPedido(pid, win){
@@ -1475,16 +1574,34 @@ async function emExecutar(){
 function renderPipeline(){
   const q = norm($('pipPesquisa').value);
   const fe = $('pipEstado').value;
+  // pedidos associados a outro (emails duplicados da mesma obra) não aparecem como
+  // linha própria — contam no badge 🔗 do pedido principal; associado_a órfão = principal
+  const ids = new Set(pedidos.map(p => String(p.id)));
+  const assocPor = {};
+  pedidos.forEach(p => {
+    if (p.associado_a && ids.has(String(p.associado_a)) && String(p.associado_a) !== String(p.id)) {
+      const k = String(p.associado_a);
+      (assocPor[k] = assocPor[k] || []).push(p);
+    }
+  });
+  pipAssocPor = assocPor;
+  const eAssociado = p => p.associado_a && ids.has(String(p.associado_a)) && String(p.associado_a) !== String(p.id);
   const lista = pedidos.filter(p => {
+    if (eAssociado(p)) return false;
     if (fe && p.estado !== fe) return false;
     if (!q) return true;
-    return norm([p.pedido, p.remetente, p.localizacao, codigoDaPasta(p.sharepoint_url), p.tipo].join(' ')).includes(q);
+    const assoc = assocPor[String(p.id)] || [];
+    return norm([p.pedido, p.remetente, p.localizacao, codigoDaPasta(p.sharepoint_url), p.tipo]
+      .concat(assoc.map(a => [a.pedido, a.remetente, a.localizacao].join(' '))).join(' ')).includes(q);
   });
   $('pipCorpo').innerHTML = lista.length ? lista.map(p =>
     '<tr' + (p.estado === 'Fora de Zona' ? ' class="linha-fora-zona"' : '') + '>' +
     '<td>' + fmtData(p.data) + '</td>' +
     '<td>' + esc(codigoDaPasta(p.sharepoint_url) || '—') + '</td>' +
-    '<td>' + esc(p.pedido || '—') + '</td>' +
+    '<td>' + esc(p.pedido || '—') +
+      ((pipAssocPor[String(p.id)] || []).length
+        ? ' <a href="#" class="chip roxo" onclick="verAssociados(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="' + (pipAssocPor[String(p.id)] || []).length + ' email(s) associado(s) a esta obra — clica para ver" style="text-decoration:none">🔗' + (pipAssocPor[String(p.id)] || []).length + '</a>'
+        : '') + '</td>' +
     '<td>' + esc(p.remetente || '—') + '</td>' +
     '<td>' + esc(p.localizacao || '—') + '</td>' +
     '<td>' + esc(p.tipo || '—') + '</td>' +
@@ -1496,6 +1613,7 @@ function renderPipeline(){
         : '<a href="#" onclick="criarPastaPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Criar pasta no SharePoint (2026)" style="text-decoration:none">📂⁺</a> ') +
       '<a href="#" onclick="emailPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\', window.open(\'\',\'_blank\')); return false" title="Abrir o email original no Outlook" style="text-decoration:none">✉️</a>' +
       (p.sharepoint_url ? ' <a href="#" onclick="arquivarEmail(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Arquivar o email e anexos na pasta" style="text-decoration:none">📥</a>' : '') +
+      ' <a href="#" onclick="associarPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Associar a um pedido já existente (email duplicado da mesma obra)" style="text-decoration:none">🔗</a>' +
       ' <a href="#" onclick="apagarPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Apagar este pedido da pipeline" style="text-decoration:none">🗑️</a>' +
     '</td>' +
     '<td><button class="btn ghost mini" onclick="orcamentarPedido(\'' + esc(p.id).replace(/'/g, "\\'") + '\')">Orçamentar →</button></td>' +
