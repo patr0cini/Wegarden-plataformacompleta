@@ -771,6 +771,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
+const BUILD = '2026-07-03a'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -800,6 +801,10 @@ const numPT = v => { // aceita "1.234,56" e "1234.56"
   const n = parseFloat(s.includes(',') ? s.replace(/\./g,'').replace(',','.') : s);
   return isNaN(n) ? 0 : n;
 };
+
+/* Alterações não gravadas no editor de orçamentos (guarda contra perda de trabalho) */
+let sujo = false;
+function marcarSujo(){ sujo = true; asAgendar(); }
 
 function toast(msg, tipo){
   const t = $('toast');
@@ -1154,7 +1159,9 @@ async function ligarContaPip(){
   } catch (e) {
     const txt = String(e.errorMessage || e.message || e);
     if (txt.includes('user_cancelled')) return;
-    if (/redirect_uri|reply.*url|AADSTS50011/i.test(txt))
+    if (/popup_window_error|empty_window_error/i.test(txt))
+      toast('O browser bloqueou a janela de login — permite popups para este site e tenta de novo.', 'erro');
+    else if (/redirect_uri|reply.*url|AADSTS50011/i.test(txt))
       toast('O endereço desta página não está autorizado no Azure. Abre a versão publicada (github.io), não o ficheiro do disco.', 'erro');
     else
       toast('Não consegui iniciar sessão: ' + txt, 'erro');
@@ -1538,9 +1545,26 @@ async function orcamentarPedido(pid){
 }
 
 async function carregarExcelDoPedido(p){
-  // só se houver sessão Microsoft; sem ela, fica o editor vazio (silencioso)
-  try { spMsal(); } catch (_) { return; }
-  if (!spConta) return;
+  // sem sessão Microsoft, propõe ligar — nunca falhar em silêncio
+  try { spMsal(); } catch (e) { toast(e.message, 'erro'); return; }
+  if (!spConta) {
+    if (!confirm('Este pedido tem pasta no SharePoint.\n\nOK para ligar a conta Microsoft e carregar o Excel da pasta Orçamentos.')) {
+      toast('Editor em branco — usa «Abrir do SharePoint» quando quiseres o Excel.');
+      return;
+    }
+    try {
+      const res = await spMsal().loginPopup({ scopes: AZ.scopes, prompt: 'select_account' });
+      spConta = res.account;
+      actualizarSessaoPip();
+    } catch (e) {
+      const txt = String(e.errorMessage || e.message || e);
+      if (txt.includes('user_cancelled')) return;
+      toast(/popup_window_error|empty_window_error/i.test(txt)
+        ? 'O browser bloqueou a janela de login — permite popups para este site e tenta de novo.'
+        : 'Não consegui iniciar sessão: ' + txt, 'erro');
+      return;
+    }
+  }
   try {
     const base = await gResolverUrl(p.sharepoint_url);
     const driveId = base.parentReference && base.parentReference.driveId;
@@ -1689,19 +1713,24 @@ function actualizarSpOrigemLabel(){
 let asTimer = null, asSaving = false, asUltimoErro = null;
 
 function asAgendar(){
-  // só age se houver ficheiro de origem com buffer original e sessão activa
-  if (!atual || !atual.spOrigem || !atual.spFill || !spConta) return;
+  // Excel: precisa de ficheiro de origem + sessão · Supabase: basta já ter sido gravado uma vez
+  if (!atual) return;
+  const temSP = atual.spOrigem && atual.spFill && spConta;
+  const temDB = !atual.novo;
+  if (!temSP && !temDB) return;
   clearTimeout(asTimer);
   asTimer = setTimeout(asExecutar, 30000);
   asActualizarIndicador('pendente');
 }
 
 async function asExecutar(){
-  if (!atual || !atual.spOrigem || !atual.spFill || asSaving) return;
+  if (!atual || asSaving) return;
   asSaving = true;
   asActualizarIndicador('a guardar');
   try {
-    await gerarExcelOriginal();  // backend faz download + preenche + upload
+    if (!atual.novo && sujo) await guardarOrcamento(true);  // BD primeiro, em silêncio
+    if (atual.spOrigem && atual.spFill && spConta)
+      await gerarExcelOriginal();  // backend faz download + preenche + upload
     asUltimoErro = null;
     asActualizarIndicador('guardado');
   } catch (e) {
@@ -1752,10 +1781,14 @@ function abrirEditor(){
   $('pesquisaPrecos').value = '';
   actualizarSpOrigemLabel();
   renderLinhas();
+  sujo = false; // abrir não conta como alteração
 }
 
 function fecharEditor(){
+  if (sujo && !confirm('Tens alterações não gravadas neste orçamento.\n\nSair sem gravar?')) return;
+  sujo = false;
   atual = null;
+  clearTimeout(asTimer);
   $('orcEditor').style.display = 'none';
   $('orcLista').style.display = 'block';
 }
@@ -1782,6 +1815,7 @@ function numerarLinhas(){
 
 function adicionarLinha(tipo){
   if (!atual) return;
+  marcarSujo();
   if (tipo === 'artigo') atual.linhas.push({ tipo, codigo:null, descricao:'', unidade:'', quantidade:1, preco_unitario:0 });
   else atual.linhas.push({ tipo, codigo:null, descricao:'', unidade:'', quantidade:0, preco_unitario:0 });
   renderLinhas();
@@ -1817,6 +1851,7 @@ $('linhasCorpo').addEventListener('input', e => {
   const inp = e.target.closest('input'); if (!inp) return;
   const i = +inp.dataset.i, f = inp.dataset.f;
   const l = atual.linhas[i]; if (!l) return;
+  marcarSujo();
   if (f === 'quantidade' || f === 'preco_unitario') {
     l[f] = numPT(inp.value);
     const cel = $('lt' + i);
@@ -1828,6 +1863,7 @@ $('linhasCorpo').addEventListener('input', e => {
 });
 
 function removerLinha(i){
+  marcarSujo();
   atual.linhas.splice(i, 1);
   if (pmIdx === i) fecharMatching();
   else if (pmIdx > i) pmIdx--;
@@ -1942,6 +1978,7 @@ function aplicarMatch(j){
   l.preco_unitario = a.p;
   if (!l.unidade) l.unidade = a.u || '';
   l.codigo = a.c || null;
+  marcarSujo();
   renderLinhas();
   toast('Aplicado: ' + fmtEur(a.p) + (a.u ? ' / ' + a.u : ''));
   const depois = atual.linhas.findIndex((x, k) => k > pmIdx && x.tipo === 'artigo' && !(x.preco_unitario > 0));
@@ -2022,7 +2059,7 @@ function amAplicar(){
   const st = AM; if (!st || !st.actual) return;
   const l = atual.linhas[st.actual.i];
   const a = precos[st.actual.j];
-  if (l && a) { l.preco_unitario = a.p; if (!l.unidade) l.unidade = a.u || ''; l.codigo = a.c || null; }
+  if (l && a) { l.preco_unitario = a.p; if (!l.unidade) l.unidade = a.u || ''; l.codigo = a.c || null; marcarSujo(); }
   st.aplicados++; st.actual = null; st.pos++;
   amProximo();
 }
@@ -2111,7 +2148,9 @@ async function spLogin(){
     const txt = String(e.errorMessage || e.message || e);
     if (txt.includes('user_cancelled') || txt.includes('user_cancelled')) return;
     let ajuda = txt;
-    if (/redirect_uri|reply.*url|AADSTS50011/i.test(txt)) {
+    if (/popup_window_error|empty_window_error/i.test(txt)) {
+      ajuda = 'O browser bloqueou a janela de login.\n\nPermite popups para patr0cini.github.io (Safari: Definições → Websites → Janelas pop-up · Chrome: ícone à direita na barra de endereço) e tenta de novo.';
+    } else if (/redirect_uri|reply.*url|AADSTS50011/i.test(txt)) {
       ajuda = 'O endereço desta página ainda não está autorizado no registo Azure.\n\nNo portal.azure.com → App registrations → (a app) → Authentication → adiciona uma plataforma «Single-page application» com o URI:\n' + window.location.origin + window.location.pathname;
     } else if (/consent|AADSTS65001|admin/i.test(txt)) {
       ajuda = 'Falta consentimento para o acesso ao SharePoint. Um administrador precisa de autorizar a permissão Sites.ReadWrite.All (delegada) no registo Azure.';
@@ -2445,12 +2484,12 @@ function atualizarTotal(){
 /* ============================================================
    Guardar
    ============================================================ */
-async function guardarOrcamento(){
+async function guardarOrcamento(silencioso){
   if (!atual) return;
   lerCabecalho();
   const h = atual.header;
-  if (!h.id) { toast('Indica o código do orçamento (ex.: ocWG26_120).', 'erro'); return; }
-  if (!h.nome_obra) { toast('Indica o nome da obra.', 'erro'); return; }
+  if (!h.id) { if (!silencioso) toast('Indica o código do orçamento (ex.: ocWG26_120).', 'erro'); return; }
+  if (!h.nome_obra) { if (!silencioso) toast('Indica o nome da obra.', 'erro'); return; }
   numerarLinhas();
   const total = calcTotal();
   if (h.estado === 'Enviado' && !h.data_envio) h.data_envio = new Date().toISOString();
@@ -2469,7 +2508,9 @@ async function guardarOrcamento(){
       headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify([corpo])
     });
-    await db(NOVO, 'orcamentos_v2_linhas?orcamento_id=eq.' + encodeURIComponent(h.id), { method: 'DELETE' });
+    // inserir as linhas novas ANTES de apagar as antigas — se a inserção falhar,
+    // as antigas ficam intactas (nunca há um momento sem linhas na BD)
+    const antigas = await db(NOVO, 'orcamentos_v2_linhas?orcamento_id=eq.' + encodeURIComponent(h.id) + '&select=id') || [];
     if (atual.linhas.length) {
       const linhas = atual.linhas.map((l, i) => ({
         orcamento_id: h.id, ordem: i, tipo: l.tipo, capitulo: l.num,
@@ -2481,10 +2522,13 @@ async function guardarOrcamento(){
       }));
       await db(NOVO, 'orcamentos_v2_linhas', { method: 'POST', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify(linhas) });
     }
+    if (antigas.length)
+      await db(NOVO, 'orcamentos_v2_linhas?id=in.(' + antigas.map(x => x.id).join(',') + ')', { method: 'DELETE' });
     atual.novo = false;
+    sujo = false;
     $('hId').readOnly = true;
     $('hId').style.background = 'var(--cal)';
-    toast('Orçamento guardado — ' + fmtEur(total));
+    if (!silencioso) toast('Orçamento guardado — ' + fmtEur(total));
     carregarOrcamentos();
   } catch (e) { toast('Erro ao guardar: ' + e.message, 'erro'); }
 }
@@ -2820,6 +2864,7 @@ function importarDoBuffer(wb, folha, hi, ci, preservar){
       atual.spFill = { nomeFolha: nomeFolha, startCol, colP: ci.p, colQ: ci.q, colV: ci.v };
     }
 
+    marcarSujo();
     renderLinhas(); actualizarSpOrigemLabel();
     const semPreco = atual.linhas.filter(l=>l.tipo==='artigo'&&!(l.preco_unitario>0)).length;
     toast('Importadas '+novas.length+' linhas'+(semPreco?' · '+semPreco+' artigos sem preço — usa ⚡ Match automático':''));
@@ -3389,7 +3434,7 @@ function fuItens(){
 
 function fuAtualizarBadge(){
   const hoje = new Date().toISOString().slice(0,10);
-  const n = fuItens().filter(x => !x.done && x.data && x.data < hoje).length;
+  const n = fuItens().filter(x => !x.done && x.data && x.data <= hoje).length; // inclui os de hoje
   const b = $('fuBadge');
   if (!b) return;
   b.textContent = n;
@@ -3588,6 +3633,27 @@ async function fuEliminar(i){
 /* ============================================================
    Arranque
    ============================================================ */
+// Carimbo de versão — visível no rodapé e na consola, para nunca haver dúvida
+// sobre qual build está carregado (cache do GitHub Pages / browser)
+console.log('We Garden · Plataforma Comercial — build ' + BUILD);
+(function(){
+  const b = document.createElement('div');
+  b.textContent = 'build ' + BUILD;
+  b.style.cssText = 'position:fixed;bottom:4px;right:8px;font-size:10px;color:#999;opacity:.75;z-index:9999;pointer-events:none';
+  document.body.appendChild(b);
+})();
+
+// Alterações de cabeçalho contam como "por gravar"
+['hId','hObra','hEstado','hCliente','hEmail','hLocal','hNotas'].forEach(id => {
+  const el = $(id);
+  if (el) { el.addEventListener('input', marcarSujo); el.addEventListener('change', marcarSujo); }
+});
+
+// Guarda contra fechar a janela com alterações não gravadas
+window.addEventListener('beforeunload', e => {
+  if (sujo) { e.preventDefault(); e.returnValue = ''; }
+});
+
 mudarTab('pipeline');
 carregarPrecos();
 carregarPedidos();
