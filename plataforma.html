@@ -22,6 +22,15 @@
   --azul:#2B5E73;
   --azul-suave:#E2EEF2;
 }
+/* Dashboards (KPIs) — pipeline e histórico */
+.kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.kpi{flex:1;min-width:128px;background:var(--branco);border:1px solid var(--linha);border-radius:10px;padding:10px 14px}
+.kpi-v{font-size:21px;font-weight:700;color:var(--verde);line-height:1.2}
+.kpi-l{font-size:11.5px;color:var(--cinza);margin-top:2px}
+.kpi-s{font-size:11px;color:var(--cinza);margin-top:1px}
+.kpi.clicavel{cursor:pointer}
+.kpi.clicavel:hover{border-color:var(--verde-claro);background:var(--verde-suave)}
+.kpi.kpi-on{border-color:var(--verde);background:var(--verde-suave)}
 *{box-sizing:border-box;margin:0;padding:0}
 body{
   font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
@@ -371,6 +380,7 @@ th .si{opacity:.45;font-size:10px}
       </div>
       <span class="aviso-leitura">Ligado à pipeline existente · estado e responsável gravam directamente lá</span>
     </div>
+    <div class="kpis" id="pipKpis"></div>
     <div style="display:flex;gap:6px;margin-bottom:10px">
       <button class="btn mini primario" id="pipVistaAtivos" onclick="mudarVistaPip('ativos')">Ativos</button>
       <button class="btn mini ghost" id="pipVistaFora" onclick="mudarVistaPip('fora')">🚫 Fora de Zona <span id="pipForaN"></span></button>
@@ -495,6 +505,7 @@ th .si{opacity:.45;font-size:10px}
       </div>
       <button class="btn primario" onclick="fuAbrir()">📅 Follow-ups <span id="fuBadge" class="fu-badge" style="display:none">0</span></button>
     </div>
+    <div class="kpis" id="histKpis"></div>
     <div class="filtros">
       <input type="text" id="histPesquisa" placeholder="Pesquisar código, obra, requerente…" oninput="renderHistorico()">
       <select id="histAno" onchange="renderHistorico()">
@@ -775,7 +786,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-06c'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-06d'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -1640,6 +1651,45 @@ function renderPipeline(){
     '</tr>'
   ).join('') : '<tr><td colspan="10" class="vazio">Nenhum pedido corresponde aos filtros.</td></tr>';
   actualizarSessaoPip();
+  renderKpisPip();
+}
+
+/* ============================================================
+   Dashboard da pipeline (cartões por cima dos separadores)
+   Os cartões de estado são clicáveis: filtram a lista (clicar de novo limpa).
+   ============================================================ */
+function renderKpisPip(){
+  const el = $('pipKpis'); if (!el) return;
+  const assocIds = new Set();
+  Object.values(pipAssocPor).forEach(arr => arr.forEach(a => assocIds.add(String(a.id))));
+  const base = pedidos.filter(p => !assocIds.has(String(p.id)));
+  const ativos = base.filter(p => p.estado !== 'Fora de Zona');
+  const corte7 = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const novos7 = ativos.filter(p => p.data && new Date(p.data).getTime() >= corte7).length;
+  const cnt = e => ativos.filter(p => p.estado === e).length;
+  const semResp = ativos.filter(p => !(p.resp || '').trim()).length;
+  const fe = $('pipEstado').value;
+  const card = (v, l, s, estadoFiltro) => {
+    const clic = estadoFiltro !== undefined;
+    const on = clic && fe === estadoFiltro;
+    return '<div class="kpi' + (clic ? ' clicavel' : '') + (on ? ' kpi-on' : '') + '"' +
+      (clic ? ' onclick="kpiFiltroPip(\'' + estadoFiltro + '\')" title="Filtrar a lista por este estado (clicar de novo limpa)"' : '') + '>' +
+      '<div class="kpi-v">' + v + '</div><div class="kpi-l">' + l + '</div>' +
+      (s ? '<div class="kpi-s">' + s + '</div>' : '') + '</div>';
+  };
+  el.innerHTML =
+    card(ativos.length, 'Pedidos ativos', novos7 + ' novos nos últimos 7 dias') +
+    card(cnt('Não iniciado'), 'Não iniciados', '', 'Não iniciado') +
+    card(cnt('Em análise'), 'Em análise', '', 'Em análise') +
+    card(cnt('No SharePoint'), 'No SharePoint', '', 'No SharePoint') +
+    card(cnt('Proposta enviada'), 'Proposta enviada', '', 'Proposta enviada') +
+    card(semResp, 'Sem responsável', 'atribuir na coluna Resp.');
+}
+
+function kpiFiltroPip(estado){
+  const sel = $('pipEstado');
+  sel.value = (sel.value === estado) ? '' : estado;
+  if (pipVista !== 'ativos') mudarVistaPip('ativos'); else renderPipeline();
 }
 
 /* A pasta do URL existe mesmo no SharePoint? (compara com a listagem pastas2026;
@@ -3334,6 +3384,32 @@ function renderHistorico(){
       '</tr>';
   }).join('') : '<tr><td colspan="10" class="vazio">Nada encontrado com estes filtros.</td></tr>';
   fuAtualizarBadge();
+  renderKpisHist(lista);
+}
+
+/* ============================================================
+   Dashboard do histórico — calculado sobre a LISTA FILTRADA,
+   por isso os filtros (ano, responsável, pesquisa…) mudam os números.
+   ============================================================ */
+function renderKpisHist(lista){
+  const el = $('histKpis'); if (!el) return;
+  const soma = arr => arr.reduce((t, x) => t + (Number(x.total) || 0), 0);
+  const env = lista.filter(x => x.estado === 'Enviado');
+  const adj = lista.filter(x => x.estado === 'Adjudicado');
+  const per = lista.filter(x => x.estado === 'Perdido');
+  const dev = lista.filter(x => ['Rascunho', 'Em revisão', 'No SharePoint'].includes(x.estado));
+  const somaAdj = soma(adj), somaPer = soma(per), somaEnv = soma(env);
+  const nDecid = adj.length + per.length;
+  const taxaN = nDecid ? Math.round(100 * adj.length / nDecid) : null;
+  const taxaV = (somaAdj + somaPer) ? Math.round(100 * somaAdj / (somaAdj + somaPer)) : null;
+  const card = (v, l, s) => '<div class="kpi"><div class="kpi-v">' + v + '</div><div class="kpi-l">' + l + '</div>' + (s ? '<div class="kpi-s">' + s + '</div>' : '') + '</div>';
+  el.innerHTML =
+    card(env.length + nDecid, 'Propostas', fmtEur(somaEnv + somaAdj + somaPer)) +
+    card(env.length, 'Enviadas (à espera)', fmtEur(somaEnv)) +
+    card(adj.length, 'Adjudicadas', fmtEur(somaAdj)) +
+    card(per.length, 'Perdidas', fmtEur(somaPer)) +
+    card(taxaN === null ? '—' : taxaN + '%', 'Taxa de adjudicação', taxaV === null ? 'sem decisões neste filtro' : taxaV + '% em valor') +
+    card(dev.length, 'Em desenvolvimento', 'rascunhos + pastas SharePoint');
 }
 
 /* Encontra o link da pasta SharePoint de um registo do histórico, cruzando
