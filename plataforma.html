@@ -771,7 +771,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-06a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-06b'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -2562,8 +2562,12 @@ async function spImportarFicheiro(drive, item, nome){
   try {
     const r = await gFetch('/drives/' + drive + '/items/' + item + '/content');
     const ab = await r.arrayBuffer();
+    const wb = XLSX.read(ab, { type: 'array' });   // processar ANTES de fechar o modal (erros ficam visíveis nele)
     spFechar();
-    importarDoBuffer(ab);
+    // guardar a origem para «Guardar no SharePoint» e auto-save escreverem no ficheiro original
+    if (atual) atual.spOrigem = { driveId: drive, itemId: item, nome: nome || 'Excel' };
+    actualizarSpOrigemLabel();
+    cmAbrir(wb, nome || 'Excel', true, null);      // modal de mapeamento de colunas, como no fluxo da pipeline
   } catch (e) { spErro(e.message); }
 }
 
