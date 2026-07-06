@@ -371,6 +371,10 @@ th .si{opacity:.45;font-size:10px}
       </div>
       <span class="aviso-leitura">Ligado à pipeline existente · estado e responsável gravam directamente lá</span>
     </div>
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button class="btn mini primario" id="pipVistaAtivos" onclick="mudarVistaPip('ativos')">Ativos</button>
+      <button class="btn mini ghost" id="pipVistaFora" onclick="mudarVistaPip('fora')">🚫 Fora de Zona <span id="pipForaN"></span></button>
+    </div>
     <div class="filtros">
       <input type="text" id="pipPesquisa" placeholder="Pesquisar pedido, remetente, localização…" oninput="renderPipeline()">
       <select id="pipEstado" onchange="renderPipeline()">
@@ -771,7 +775,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-06b'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-06c'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -1020,7 +1024,7 @@ async function carregarPedidos(){
     pipEstados = [...new Set(pedidos.map(p => p.estado).filter(Boolean))].sort();
     if (!pipEstados.includes('No SharePoint')) pipEstados.push('No SharePoint');
     pipResps = [...new Set(pedidos.map(p => (p.resp || '').trim()).filter(Boolean))].sort();
-    $('pipEstado').innerHTML = '<option value="">Todos os estados</option>' + pipEstados.map(e => '<option>' + esc(e) + '</option>').join('');
+    $('pipEstado').innerHTML = '<option value="">Todos os estados</option>' + pipEstados.filter(e => e !== 'Fora de Zona').map(e => '<option>' + esc(e) + '</option>').join('');
     renderPipeline();
     reconciliarNoSharePoint();  // marca "No SharePoint" os que já têm pasta mas ainda estão "Não iniciado"
   } catch (e) {
@@ -1049,13 +1053,22 @@ async function reconciliarNoSharePoint(){
   if (feitos) {
     if (!pipEstados.includes('No SharePoint')) {
       pipEstados.push('No SharePoint'); pipEstados.sort();
-      $('pipEstado').innerHTML = '<option value="">Todos os estados</option>' + pipEstados.map(e => '<option>' + esc(e) + '</option>').join('');
+      $('pipEstado').innerHTML = '<option value="">Todos os estados</option>' + pipEstados.filter(e => e !== 'Fora de Zona').map(e => '<option>' + esc(e) + '</option>').join('');
     }
     renderPipeline();
   }
 }
 
 let pipEstados = [], pipResps = [], pipAssocPor = {};
+
+/* Vista da pipeline: 'ativos' (tudo excepto Fora de Zona) ou 'fora' (só Fora de Zona) */
+let pipVista = 'ativos';
+function mudarVistaPip(v){
+  pipVista = v;
+  $('pipVistaAtivos').className = 'btn mini' + (v === 'ativos' ? ' primario' : ' ghost');
+  $('pipVistaFora').className = 'btn mini' + (v === 'fora' ? ' primario' : ' ghost');
+  renderPipeline();
+}
 
 function selEstadoPedido(p){
   const ops = (p.estado && !pipEstados.includes(p.estado)) ? [p.estado, ...pipEstados] : pipEstados;
@@ -1079,7 +1092,8 @@ async function mudarEstadoPedido(id, estado){
     await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(id), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify({ estado }) });
     const p = pedidos.find(x => String(x.id) === String(id));
     if (p) p.estado = estado;
-    toast('Estado actualizado na pipeline');
+    toast(estado === 'Fora de Zona' ? 'Movido para o separador 🚫 Fora de Zona' : 'Estado actualizado na pipeline');
+    renderPipeline(); // sai/entra do separador imediatamente
   } catch (e) { toast('Erro ao actualizar estado: ' + e.message, 'erro'); renderPipeline(); }
 }
 
@@ -1367,7 +1381,7 @@ async function criarPastaPedido(pid){
       p.estado = 'No SharePoint';
       if (!pipEstados.includes('No SharePoint')) {
         pipEstados.push('No SharePoint');
-        $('pipEstado').innerHTML = '<option value="">Todos os estados</option>' + pipEstados.map(e => '<option>' + esc(e) + '</option>').join('');
+        $('pipEstado').innerHTML = '<option value="">Todos os estados</option>' + pipEstados.filter(e => e !== 'Fora de Zona').map(e => '<option>' + esc(e) + '</option>').join('');
       }
     }
     renderPipeline();
@@ -1586,8 +1600,13 @@ function renderPipeline(){
   });
   pipAssocPor = assocPor;
   const eAssociado = p => p.associado_a && ids.has(String(p.associado_a)) && String(p.associado_a) !== String(p.id);
+  // contador do separador Fora de Zona (sem os associados)
+  const nFora = pedidos.filter(p => !eAssociado(p) && p.estado === 'Fora de Zona').length;
+  const elFora = $('pipForaN');
+  if (elFora) elFora.textContent = nFora ? '(' + nFora + ')' : '';
   const lista = pedidos.filter(p => {
     if (eAssociado(p)) return false;
+    if (pipVista === 'fora' ? p.estado !== 'Fora de Zona' : p.estado === 'Fora de Zona') return false;
     if (fe && p.estado !== fe) return false;
     if (!q) return true;
     const assoc = assocPor[String(p.id)] || [];
