@@ -545,12 +545,15 @@ th .si{opacity:.45;font-size:10px}
           <th class="ordenavel num" onclick="histSort('total')">Total <span class="si">↕</span></th>
           <th class="ordenavel" onclick="histSort('sortKey')">Enviado em <span class="si">↕</span></th>
           <th class="ordenavel" onclick="histSort('_grau')" style="text-align:center">Interesse <span class="si">↕</span></th>
+          <th class="ordenavel" onclick="histSort('concurso')" style="text-align:center" title="É concurso?">Conc. <span class="si">↕</span></th>
+          <th class="ordenavel" onclick="histSort('visita')" style="text-align:center" title="Já se fez visita?">Visita <span class="si">↕</span></th>
+          <th class="ordenavel" onclick="histSort('arranque')" title="Data prevista de arranque da obra">Arranque <span class="si">↕</span></th>
           <th class="ordenavel" onclick="histSort('cliente')">Requerente <span class="si">↕</span></th>
           <th class="ordenavel" onclick="histSort('responsavel')" style="text-align:center">Resp. <span class="si">↕</span></th>
           <th class="ordenavel" onclick="histSort('estado')">Estado <span class="si">↕</span></th>
           <th style="text-align:center">Nota</th>
         </tr></thead>
-        <tbody id="histCorpo"><tr><td colspan="10" class="vazio">A carregar…</td></tr></tbody>
+        <tbody id="histCorpo"><tr><td colspan="13" class="vazio">A carregar…</td></tr></tbody>
       </table>
     </div>
     <p style="font-size:12px;color:var(--cinza);margin-top:8px">Clica numa linha para ver e editar — as alterações às fontes 2024–2026 são gravadas nas plataformas existentes através das suas APIs.</p>
@@ -794,7 +797,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-06g'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-06h'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -817,6 +820,8 @@ const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '
 const fmtEur = v => (Number(v) || 0).toLocaleString('pt-PT', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' €';
 const fmtData = d => { if(!d) return '—'; const x = new Date(d); return isNaN(x) ? '—' : x.toLocaleDateString('pt-PT'); };
 const fmtDataHora = d => { if(!d) return ''; const x = new Date(d); return isNaN(x) ? '' : x.toLocaleString('pt-PT', {day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}); };
+const MESES_PT = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+const fmtMes = d => { if(!d) return '—'; const x = new Date(d); return isNaN(x) ? '—' : MESES_PT[x.getMonth()] + ' ' + x.getFullYear(); };
 const numPT = v => { // aceita "1.234,56" e "1234.56"
   if (typeof v === 'number') return v;
   const s = String(v ?? '').trim().replace(/\s/g,'');
@@ -3224,6 +3229,16 @@ function calcGrau(valor, concurso, dataArranque, override){
   return { label: pts <= 1 ? 'Baixo' : pts === 2 ? 'Médio' : pts <= 4 ? 'Alto' : 'Muito Alto', manual:false, score:pts };
 }
 function grauDe(it){ const g = it.grauData || {}; return calcGrau(g.valor, g.concurso, g.dataArranque, g.override); }
+/* Célula compacta Sim/Não para Concurso/Visita: ✓ verde, ✕ cinza, texto livre truncado */
+function simNaoChip(v){
+  const s = String(v || '').trim();
+  if (!s) return '<span style="color:var(--cinza)">—</span>';
+  const n = norm(s);
+  if (n === 'sim') return '<span style="color:#2e6b2a;font-weight:700" title="Sim">✓</span>';
+  if (n === 'nao') return '<span style="color:var(--cinza)" title="Não">✕</span>';
+  return '<span title="' + esc(s) + '">' + esc(s.length > 10 ? s.slice(0, 9) + '…' : s) + '</span>';
+}
+
 function grauChip(g){
   const cls = { 'Baixo':'g-baixo', 'Médio':'g-medio', 'Alto':'g-alto', 'Muito Alto':'g-muitoalto' }[g.label] || 'g-baixo';
   return '<span class="grau ' + cls + '"' + (g.manual ? ' title="definido manualmente"' : '') + '>' + g.label + (g.manual ? ' ✎' : '') + '</span>';
@@ -3292,7 +3307,8 @@ function normalizarAntigo(fonte, rec){
     cliente: rec.requerente || '',
     responsavel: rec.responsavel || '',
     total: Number(rec.valor) || 0,
-    dataTxt: rec.dataEnvio ? fmtData(rec.dataEnvio) : (rec.mes ? rec.mes : '—'),
+    concurso: rec.concurso || '', visita: rec.visita || '', arranque: rec.dataArranque || '',
+    dataTxt: rec.dataEnvio ? fmtMes(rec.dataEnvio) : (rec.mes ? rec.mes : '—'),
     sortKey: rec.dataEnvio || rec.addedAt || (fonte + '-01-01'),
     estado, followups,
     grauData: { valor: Number(rec.valor) || 0, concurso: rec.concurso, dataArranque: rec.dataArranque, override: rec.grauOverride || '' },
@@ -3332,7 +3348,8 @@ function renderHistorico(){
       fonte:'2026', codigo:o.id, obra:o.nome_obra || '', cliente:o.cliente || '',
       responsavel: o.responsavel || '',
       total:Number(o.total) || 0,
-      dataTxt: o.data_envio ? fmtData(o.data_envio) : 'Em desenvolvimento',
+      concurso: o.concurso || '', visita: o.visita || '', arranque: o.data_arranque || '',
+      dataTxt: o.data_envio ? fmtMes(o.data_envio) : 'Em desenvolvimento',
       sortKey: o.data_envio || o.atualizado_em || '',
       estado:o.estado,
       followups: (Array.isArray(o.followups) ? o.followups : [])
@@ -3362,6 +3379,7 @@ function renderHistorico(){
       cliente: '',
       responsavel: '',
       total: 0,
+      concurso: '', visita: '', arranque: '',
       dataTxt: 'Orçamento em Desenvolvimento',
       sortKey: pp.modificado || pp.criado || '9999',  // ordenar para o topo por defeito (desc)
       estado: 'No SharePoint',
@@ -3415,12 +3433,15 @@ function renderHistorico(){
       '<td class="num">' + fmtEur(it.total) + '</td>' +
       '<td>' + esc(it.dataTxt) + '</td>' +
       '<td style="text-align:center">' + grauChip(grauDe(it)) + '</td>' +
+      '<td style="text-align:center">' + simNaoChip(it.concurso) + '</td>' +
+      '<td style="text-align:center">' + simNaoChip(it.visita) + '</td>' +
+      '<td title="' + esc(it.arranque || '') + '">' + esc((it.arranque || '—').length > 14 ? it.arranque.slice(0,13) + '…' : (it.arranque || '—')) + '</td>' +
       '<td title="' + esc(it.cliente) + '">' + esc(it.cliente.length > 18 ? it.cliente.slice(0,17) + '…' : (it.cliente || '—')) + '</td>' +
       '<td style="text-align:center">' + (it.responsavel ? '<span class="resp-pill">' + esc(it.responsavel) + '</span>' : '<span style="color:var(--cinza)">—</span>') + '</td>' +
       '<td>' + chipOrc(it.estado) + '</td>' +
       '<td style="text-align:center">' + (nFu ? '<span class="b-nota">' + nFu + '</span>' : '<span style="color:var(--cinza);font-size:11px">—</span>') + '</td>' +
       '</tr>';
-  }).join('') : '<tr><td colspan="10" class="vazio">Nada encontrado com estes filtros.</td></tr>';
+  }).join('') : '<tr><td colspan="13" class="vazio">Nada encontrado com estes filtros.</td></tr>';
   fuAtualizarBadge();
   renderKpisHist(lista, listaSemAno, fa);
 }
