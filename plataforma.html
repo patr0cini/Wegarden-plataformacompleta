@@ -31,6 +31,12 @@
 .kpi.clicavel{cursor:pointer}
 .kpi.clicavel:hover{border-color:var(--verde-claro);background:var(--verde-suave)}
 .kpi.kpi-on{border-color:var(--verde);background:var(--verde-suave)}
+.kpi-anos{width:100%;border-collapse:collapse;font-size:12.5px}
+.kpi-anos th{font-size:11px;font-weight:600;color:var(--cinza)}
+.kpi-anos th,.kpi-anos td{padding:4px 8px;text-align:right;border-top:1px solid var(--linha)}
+.kpi-anos thead th{border-top:none}
+.kpi-anos tr.clicavel{cursor:pointer}
+.kpi-anos tr.clicavel:hover,.kpi-anos tr.kpi-on{background:var(--verde-suave)}
 *{box-sizing:border-box;margin:0;padding:0}
 body{
   font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
@@ -786,7 +792,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-06d'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-06e'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -3342,8 +3348,8 @@ function renderHistorico(){
   const resps = [...new Set(tudoCompleto.map(t => t.responsavel).filter(Boolean))].sort((a,b) => a.localeCompare(b,'pt'));
   selR.innerHTML = '<option value="">Todos os responsáveis</option>' + resps.map(r => '<option' + (r === atualR ? ' selected' : '') + '>' + esc(r) + '</option>').join('');
 
-  let lista = tudoCompleto.filter(it => {
-    if (fa && anoDoRegisto(it) !== fa) return false;
+  // lista sem o filtro de ano — alimenta a divisão por anos do dashboard
+  const listaSemAno = tudoCompleto.filter(it => {
     if (ff && it.fonte !== ff) return false;
     if (fe && it.estado !== fe) return false;
     if (fr && it.responsavel !== fr) return false;
@@ -3351,6 +3357,7 @@ function renderHistorico(){
     if (!q) return true;
     return norm([it.codigo, it.obra, it.cliente, it.responsavel].join(' ')).includes(q);
   });
+  let lista = fa ? listaSemAno.filter(it => anoDoRegisto(it) === fa) : listaSemAno.slice();
 
   const col = histOrd.col, asc = histOrd.asc ? 1 : -1;
   lista.sort((a, b) => {
@@ -3384,14 +3391,14 @@ function renderHistorico(){
       '</tr>';
   }).join('') : '<tr><td colspan="10" class="vazio">Nada encontrado com estes filtros.</td></tr>';
   fuAtualizarBadge();
-  renderKpisHist(lista);
+  renderKpisHist(lista, listaSemAno, fa);
 }
 
 /* ============================================================
    Dashboard do histórico — calculado sobre a LISTA FILTRADA,
    por isso os filtros (ano, responsável, pesquisa…) mudam os números.
    ============================================================ */
-function renderKpisHist(lista){
+function renderKpisHist(lista, listaSemAno, anoSel){
   const el = $('histKpis'); if (!el) return;
   const soma = arr => arr.reduce((t, x) => t + (Number(x.total) || 0), 0);
   const env = lista.filter(x => x.estado === 'Enviado');
@@ -3403,13 +3410,53 @@ function renderKpisHist(lista){
   const taxaN = nDecid ? Math.round(100 * adj.length / nDecid) : null;
   const taxaV = (somaAdj + somaPer) ? Math.round(100 * somaAdj / (somaAdj + somaPer)) : null;
   const card = (v, l, s) => '<div class="kpi"><div class="kpi-v">' + v + '</div><div class="kpi-l">' + l + '</div>' + (s ? '<div class="kpi-s">' + s + '</div>' : '') + '</div>';
-  el.innerHTML =
+  const cards =
     card(env.length + nDecid, 'Propostas', fmtEur(somaEnv + somaAdj + somaPer)) +
     card(env.length, 'Enviadas (à espera)', fmtEur(somaEnv)) +
     card(adj.length, 'Adjudicadas', fmtEur(somaAdj)) +
     card(per.length, 'Perdidas', fmtEur(somaPer)) +
     card(taxaN === null ? '—' : taxaN + '%', 'Taxa de adjudicação', taxaV === null ? 'sem decisões neste filtro' : taxaV + '% em valor') +
     card(dev.length, 'Em desenvolvimento', 'rascunhos + pastas SharePoint');
+
+  // ===== divisão por anos — ignora o filtro de ano (respeita os restantes) =====
+  const porAno = {};
+  (listaSemAno || lista).forEach(it => {
+    if (!['Enviado', 'Adjudicado', 'Perdido'].includes(it.estado)) return;
+    const a = anoDoRegisto(it);
+    (porAno[a] = porAno[a] || []).push(it);
+  });
+  const anos = Object.keys(porAno).sort().reverse();
+  let tbl = '';
+  if (anos.length) {
+    tbl = '<div class="kpi" style="flex-basis:100%">' +
+      '<div class="kpi-l" style="margin-bottom:6px">Por ano — clicar num ano filtra a lista (clicar de novo limpa) · respeita os outros filtros</div>' +
+      '<table class="kpi-anos"><thead><tr><th style="text-align:left">Ano</th><th>Propostas</th><th>Proposto</th><th>Adjudicado</th><th>Perdido</th><th>Taxa nº · valor</th></tr></thead><tbody>' +
+      anos.map(a => {
+        const xs = porAno[a];
+        const aEnv = xs.filter(x => x.estado === 'Enviado'), aAdj = xs.filter(x => x.estado === 'Adjudicado'), aPer = xs.filter(x => x.estado === 'Perdido');
+        const sAdj = soma(aAdj), sPer = soma(aPer);
+        const tx = (aAdj.length + aPer.length) ? Math.round(100 * aAdj.length / (aAdj.length + aPer.length)) + '%' : '—';
+        const txV = (sAdj + sPer) ? Math.round(100 * sAdj / (sAdj + sPer)) + '%' : '—';
+        return '<tr class="clicavel' + (anoSel === a ? ' kpi-on' : '') + '" onclick="kpiFiltroAno(\'' + a + '\')">' +
+          '<td style="text-align:left"><b>' + a + '</b></td>' +
+          '<td>' + xs.length + '</td>' +
+          '<td>' + fmtEur(soma(aEnv) + sAdj + sPer) + '</td>' +
+          '<td>' + aAdj.length + ' · ' + fmtEur(sAdj) + '</td>' +
+          '<td>' + aPer.length + ' · ' + fmtEur(sPer) + '</td>' +
+          '<td>' + tx + ' · ' + txV + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  el.innerHTML = cards + tbl;
+}
+
+function kpiFiltroAno(a){
+  const sel = $('histAno');
+  if (sel.value === a) { sel.value = ''; }
+  else {
+    if (![...sel.options].some(o => o.value === a || o.text === a)) sel.add(new Option(a, a));
+    sel.value = a;
+  }
+  renderHistorico();
 }
 
 /* Encontra o link da pasta SharePoint de um registo do histórico, cruzando
