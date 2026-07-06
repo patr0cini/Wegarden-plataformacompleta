@@ -797,7 +797,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-06h'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-06i'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -1180,6 +1180,70 @@ async function apagarPedido(id){
     toast('Pedido apagado da pipeline');
     renderPipeline();
   } catch (e) { toast('Erro ao apagar: ' + e.message, 'erro'); }
+}
+
+/* ============================================================
+   Ligar um pedido a uma pasta JÁ existente no SharePoint
+   (pastas criadas à mão, fora da plataforma). Usa a listagem
+   pastas2026 já carregada — não precisa de sessão Microsoft.
+   ============================================================ */
+let LIGAR = null; // pedido a ligar
+
+function ligarPastaPedido(pid){
+  const p = pedidos.find(x => String(x.id) === String(pid));
+  if (!p) return;
+  if (!pastasSharePoint.length) { toast('A listagem de pastas do SharePoint ainda não carregou — tenta daqui a instantes.', 'erro'); return; }
+  LIGAR = p;
+  $('emTitulo').textContent = '📎 Ligar a uma pasta existente no SharePoint';
+  $('emCorpo').innerHTML =
+    '<div style="margin-bottom:10px;font-size:12.5px;color:var(--cinza)">Escolhe a pasta de <b>' + esc(p.pedido || '—') + '</b>. Sugestões (nome parecido) aparecem primeiro; podes pesquisar por código ou nome.</div>' +
+    '<input id="ligarPesquisa" placeholder="Procurar pasta por código ou nome…" oninput="ligarRender()" style="width:100%;margin-bottom:8px;padding:7px 10px;border:1px solid var(--linha);border-radius:6px;font-size:13px">' +
+    '<div id="ligarLista" style="max-height:50vh;overflow:auto"></div>';
+  $('emAcoes').innerHTML = '<button class="btn ghost" onclick="emFechar()">Cancelar</button>';
+  $('emailOverlay').classList.add('aberto');
+  ligarRender();
+}
+
+function ligarRender(){
+  if (!LIGAR) return;
+  const q = norm($('ligarPesquisa').value);
+  const usadas = new Set(pedidos
+    .filter(x => x.sharepoint_url && String(x.id) !== String(LIGAR.id))
+    .map(x => codigoDaPasta(x.sharepoint_url)).filter(Boolean));
+  const kwP = new Set(norm([LIGAR.pedido, LIGAR.remetente, LIGAR.localizacao].join(' ')).split(/\s+/).filter(w => w.length > 3));
+  let lista = pastasSharePoint.map((pp, i) => ({
+    pp, i,
+    score: norm(pp.nome).split(/\s+/).filter(w => w.length > 3 && kwP.has(w)).length,
+    usada: usadas.has(pp.codigo)
+  }));
+  if (q) lista = lista.filter(({pp}) => norm(pp.nome).includes(q));
+  lista.sort((a, b) => b.score - a.score || String(b.pp.codigo).localeCompare(String(a.pp.codigo)));
+  lista = lista.slice(0, 40);
+  $('ligarLista').innerHTML = lista.length ? lista.map(({pp, i, score, usada}) =>
+    '<div class="pm-item" onclick="ligarEscolhida(' + i + ')">' +
+      '<span>' + (score >= 2 ? '⭐' : '📁') + '</span><span class="pm-desc"><b>' + esc(pp.codigo) + '</b> ' + esc(pp.obra || pp.nome) +
+      '<div class="pm-meta">' + (usada ? '⚠ já ligada a outro pedido' : (score >= 2 ? 'sugestão — nome parecido' : '&nbsp;')) + '</div></span>' +
+    '</div>'
+  ).join('') : '<div style="padding:14px;color:var(--cinza);font-size:13px">Nenhuma pasta encontrada com essa pesquisa.</div>';
+}
+
+async function ligarEscolhida(i){
+  const p = LIGAR, pp = pastasSharePoint[i];
+  if (!p || !pp) return;
+  const usada = pedidos.some(x => x.sharepoint_url && String(x.id) !== String(p.id) && codigoDaPasta(x.sharepoint_url) === pp.codigo);
+  if (usada && !confirm('A pasta ' + pp.codigo + ' já está ligada a outro pedido.\n\nLigar este pedido à MESMA pasta?')) return;
+  try {
+    const corpo = { sharepoint_url: pp.webUrl };
+    // promover o estado como a reconciliação faz — só se ainda não foi trabalhado
+    if (!p.estado || p.estado === 'Não iniciado' || p.estado === 'Novo') corpo.estado = 'No SharePoint';
+    await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(p.id), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify(corpo) });
+    p.sharepoint_url = pp.webUrl;
+    if (corpo.estado) p.estado = corpo.estado;
+    LIGAR = null;
+    emFechar();
+    toast('Pedido ligado à pasta ' + pp.codigo + ' 📎');
+    renderPipeline();
+  } catch (e) { toast('Erro ao ligar: ' + e.message, 'erro'); }
 }
 
 /* ============================================================
@@ -1682,8 +1746,9 @@ function renderPipeline(){
     '<td style="text-align:center;white-space:nowrap">' +
       (p.sharepoint_url
         ? '<a href="' + esc(p.sharepoint_url) + '" target="_blank" rel="noopener" title="Pasta no SharePoint" style="text-decoration:none">📁</a> ' +
-          (!pastaExisteSP(p.sharepoint_url) ? '<span title="Esta pasta NÃO existe no SharePoint — o link do pedido está errado" style="cursor:help">⚠</span> ' : '')
-        : '<a href="#" onclick="criarPastaPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Criar pasta no SharePoint (2026)" style="text-decoration:none">📂⁺</a> ') +
+          (!pastaExisteSP(p.sharepoint_url) ? '<a href="#" onclick="ligarPastaPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Esta pasta NÃO existe no SharePoint — clica para escolher a pasta certa" style="text-decoration:none">⚠</a> ' : '')
+        : '<a href="#" onclick="criarPastaPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Criar pasta nova no SharePoint (2026)" style="text-decoration:none">📂⁺</a> ' +
+          '<a href="#" onclick="ligarPastaPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Ligar a uma pasta que JÁ existe no SharePoint" style="text-decoration:none">📎</a> ') +
       '<a href="#" onclick="emailPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\', window.open(\'\',\'_blank\')); return false" title="Abrir o email original no Outlook" style="text-decoration:none">✉️</a>' +
       (p.sharepoint_url ? ' <a href="#" onclick="arquivarEmail(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Arquivar o email e anexos na pasta" style="text-decoration:none">📥</a>' : '') +
       ' <a href="#" onclick="associarPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Associar a um pedido já existente (email duplicado da mesma obra)" style="text-decoration:none">🔗</a>' +
