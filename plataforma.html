@@ -771,7 +771,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-04a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-06a'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -1609,7 +1609,8 @@ function renderPipeline(){
     '<td>' + selRespPedido(p) + '</td>' +
     '<td style="text-align:center;white-space:nowrap">' +
       (p.sharepoint_url
-        ? '<a href="' + esc(p.sharepoint_url) + '" target="_blank" rel="noopener" title="Pasta no SharePoint" style="text-decoration:none">📁</a> '
+        ? '<a href="' + esc(p.sharepoint_url) + '" target="_blank" rel="noopener" title="Pasta no SharePoint" style="text-decoration:none">📁</a> ' +
+          (!pastaExisteSP(p.sharepoint_url) ? '<span title="Esta pasta NÃO existe no SharePoint — o link do pedido está errado" style="cursor:help">⚠</span> ' : '')
         : '<a href="#" onclick="criarPastaPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Criar pasta no SharePoint (2026)" style="text-decoration:none">📂⁺</a> ') +
       '<a href="#" onclick="emailPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\', window.open(\'\',\'_blank\')); return false" title="Abrir o email original no Outlook" style="text-decoration:none">✉️</a>' +
       (p.sharepoint_url ? ' <a href="#" onclick="arquivarEmail(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Arquivar o email e anexos na pasta" style="text-decoration:none">📥</a>' : '') +
@@ -1620,6 +1621,15 @@ function renderPipeline(){
     '</tr>'
   ).join('') : '<tr><td colspan="10" class="vazio">Nenhum pedido corresponde aos filtros.</td></tr>';
   actualizarSessaoPip();
+}
+
+/* A pasta do URL existe mesmo no SharePoint? (compara com a listagem pastas2026;
+   sem listagem carregada não acusa nada). Apanha URLs fabricados com código errado. */
+function pastaExisteSP(url){
+  if (!url || !pastasSharePoint.length) return true;
+  let seg = String(url).replace(/\/+$/, '').split('/').pop();
+  try { seg = decodeURIComponent(seg); } catch (_) { /* usa o original */ }
+  return pastasSharePoint.some(pp => norm(pp.nome) === norm(seg));
 }
 
 /* Extrai o código ocWG26_NNN do nome da pasta do SharePoint (sharepoint_url) */
@@ -3080,6 +3090,7 @@ async function carregarPastasSharePoint(){
     console.warn('Pastas SharePoint indisponíveis:', e.message);
   }
   renderHistorico();
+  renderPipeline(); // reavaliar os avisos ⚠ de pastas inexistentes
 }
 
 /* Grau de interesse — mesma fórmula da plataforma 2025 */
@@ -3204,13 +3215,14 @@ function renderHistorico(){
   const fr = $('histResp').value;
   const fg = $('histGrau').value;
 
+  // TODOS os orçamentos da plataforma entram no histórico — incluindo Rascunho e
+  // Em revisão (antes só Enviado/Adjudicado/Perdido, o que escondia obras em curso)
   const novos = orcamentos
-    .filter(o => ['Enviado','Adjudicado','Perdido'].includes(o.estado))
     .map(o => ({
       fonte:'2026', codigo:o.id, obra:o.nome_obra || '', cliente:o.cliente || '',
       responsavel: o.responsavel || '',
       total:Number(o.total) || 0,
-      dataTxt: fmtData(o.data_envio),
+      dataTxt: o.data_envio ? fmtData(o.data_envio) : 'Em desenvolvimento',
       sortKey: o.data_envio || o.atualizado_em || '',
       estado:o.estado,
       followups: (Array.isArray(o.followups) ? o.followups : [])
@@ -3222,15 +3234,14 @@ function renderHistorico(){
   const tudo = novos.concat(historicoAntigo);
 
   // ===== Análise automática: pastas no SharePoint ainda sem orçamento =====
-  // Reúne todos os códigos ocWG26_NNN que JÁ têm orçamento (em qualquer fonte),
-  // seja pelo código do registo, seja pelo código embebido no sharepoint_url do pedido.
+  // Reúne os códigos ocWG26_NNN que JÁ têm orçamento REGISTADO (plataforma ou
+  // histórico antigo). NÃO usar os sharepoint_url da pipeline como prova de
+  // orçamento: houve URLs fabricados com códigos errados (16 pedidos a dizer
+  // «123» em maio/2026) que escondiam as pastas reais 122–128 do histórico.
   const codigosComOrcamento = new Set();
   const addCod = v => { const m = String(v || '').match(/ocWG\d{2}_\d{3}/); if (m) codigosComOrcamento.add(m[0]); };
-  // O código de um pedido deriva SÓ da pasta SharePoint (sharepoint_url).
-  // O campo 'codigo' da pipeline foi descontinuado: só havia orçamento quando há pasta.
   tudo.forEach(it => { addCod(it.codigo); });
   orcamentos.forEach(o => { addCod(o.id); addCod(o.pedido_id); });
-  pedidos.forEach(p => { addCod(p.sharepoint_url); });
 
   const virtuaisSP = pastasSharePoint
     .filter(pp => !codigosComOrcamento.has(pp.codigo))
