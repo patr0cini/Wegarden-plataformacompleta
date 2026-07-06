@@ -797,7 +797,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-06i'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-06j'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -1471,7 +1471,7 @@ async function criarPastaPedido(pid){
     });
     const pasta = await r.json();
     // subpastas padrão
-    for (const sub of ['Orçamentos', 'Emails']) {
+    for (const sub of ['Orçamentos', 'Emails', 'Peças Desenhadas']) {
       try {
         await gFetch('/drives/' + driveId + '/items/' + pasta.id + '/children', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1606,16 +1606,21 @@ async function emPreparar(p, msg){
     if (!driveId || !base.id) throw new Error('não consegui abrir a pasta deste pedido no SharePoint.');
     const filhos = await gJson('/drives/' + driveId + '/items/' + base.id + '/children?$select=id,name,folder&$top=200');
     let subpastas = (filhos.value || []).filter(f => f.folder).map(f => ({ id: f.id, nome: f.name }));
-    // garantir Emails
-    let emails = subpastas.find(s => norm(s.nome) === 'emails');
-    if (!emails) {
+    // garantir as subpastas padrão (cria as que faltarem)
+    const garantir = async nome => {
+      let s = subpastas.find(x => norm(x.nome) === norm(nome));
+      if (s) return s;
       const nova = await (await gFetch('/drives/' + driveId + '/items/' + base.id + '/children', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Emails', folder: {}, '@microsoft.graph.conflictBehavior': 'fail' })
+        body: JSON.stringify({ name: nome, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' })
       })).json();
-      emails = { id: nova.id, nome: 'Emails' };
-      subpastas.unshift(emails);
-    }
+      s = { id: nova.id, nome };
+      subpastas.push(s);
+      return s;
+    };
+    const emails = await garantir('Emails');
+    await garantir('Orçamentos');
+    await garantir('Peças Desenhadas');
     // listar anexos
     const ja = await (await fetch(FN_EMAIL + '?acao=anexos&id=' + encodeURIComponent(msg.id), { headers: { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key } })).json();
     if (!ja.ok) throw new Error(ja.message || 'não consegui listar os anexos.');
@@ -1627,7 +1632,11 @@ async function emPreparar(p, msg){
 
 function emRenderTriagem(){
   const orc = EM.subpastas.find(s => norm(s.nome) === 'orçamentos' || norm(s.nome) === 'orcamentos');
+  const pecas = EM.subpastas.find(s => norm(s.nome) === 'pecas desenhadas');
   const padraoFich = orc ? orc.id : (EM.subpastas[0] && EM.subpastas[0].id);
+  // PDFs e desenhos (dwg/dwf) vão por defeito para Peças Desenhadas; o resto para Orçamentos.
+  // O utilizador pode sempre mudar o destino (ou excluir) no seletor de cada anexo.
+  const padraoDe = nome => (pecas && /\.(pdf|dwg|dwf)$/i.test(String(nome || ''))) ? pecas.id : padraoFich;
   const fmtT = n => n > 1048576 ? (n/1048576).toFixed(1)+' MB' : (n>1024 ? Math.round(n/1024)+' KB' : n+' B');
 
   let html = '<div class="am-sec">Email</div>' +
@@ -1645,7 +1654,7 @@ function emRenderTriagem(){
         '<div class="pm-meta">' + fmtT(a.tamanho) + (a.inline ? ' · inline (provável assinatura)' : '') + '</div></div>' +
         '<select class="sel-mini em-dest" data-i="' + i + '">' +
           '<option value="__ignorar"' + (ignorar ? ' selected' : '') + '>— não carregar —</option>' +
-          emOpcoesSubpastaDefault(ignorar ? null : padraoFich) +
+          emOpcoesSubpastaDefault(ignorar ? null : padraoDe(a.nome)) +
         '</select>' +
       '</div>';
     }).join('');
