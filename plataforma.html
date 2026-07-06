@@ -397,6 +397,7 @@ th .si{opacity:.45;font-size:10px}
         <option value="">Todos os estados</option>
       </select>
       <button class="btn ghost mini" onclick="carregarPedidos()" title="Reler a pipeline">↻ Actualizar</button>
+      <span id="pipTriagem" style="font-size:11.5px;color:var(--cinza)"></span>
       <span id="pipSessao" style="margin-left:auto;font-size:12px;color:var(--cinza)"></span>
     </div>
     <div class="tabela-wrap">
@@ -792,7 +793,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-06e'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-06f'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -1043,6 +1044,7 @@ async function carregarPedidos(){
     pipResps = [...new Set(pedidos.map(p => (p.resp || '').trim()).filter(Boolean))].sort();
     $('pipEstado').innerHTML = '<option value="">Todos os estados</option>' + pipEstados.filter(e => e !== 'Fora de Zona').map(e => '<option>' + esc(e) + '</option>').join('');
     renderPipeline();
+    estadoTriagem();
     reconciliarNoSharePoint();  // marca "No SharePoint" os que já têm pasta mas ainda estão "Não iniciado"
   } catch (e) {
     $('pipCorpo').innerHTML = '<tr><td colspan="10" class="vazio">Não foi possível ler a pipeline — ' + esc(e.message) + '</td></tr>';
@@ -1077,6 +1079,25 @@ async function reconciliarNoSharePoint(){
 }
 
 let pipEstados = [], pipResps = [], pipAssocPor = {};
+
+/* Heartbeat da triagem de emails: lê a última corrida (triagem_log) e avisa se parou.
+   A triagem corre a cada 5 min via cron — mais de 1h sem correr = problema. */
+async function estadoTriagem(){
+  const el = $('pipTriagem');
+  if (!el) return;
+  try {
+    const rows = await db(PIPELINE, 'triagem_log?select=corrido_em,novos&order=corrido_em.desc&limit=1');
+    if (!rows || !rows.length) { el.textContent = ''; return; }
+    const horas = (Date.now() - new Date(rows[0].corrido_em).getTime()) / 3600000;
+    if (horas > 1) {
+      el.innerHTML = '⚠ <b>Importação de emails parada</b> desde ' + fmtDataHora(rows[0].corrido_em) + ' — avisar o JP';
+      el.style.color = 'var(--erro)';
+    } else {
+      el.textContent = '✉ emails verificados ' + fmtDataHora(rows[0].corrido_em);
+      el.style.color = 'var(--cinza)';
+    }
+  } catch (_) { el.textContent = ''; }
+}
 
 /* Vista da pipeline: 'ativos' (tudo excepto Fora de Zona) ou 'fora' (só Fora de Zona) */
 let pipVista = 'ativos';
