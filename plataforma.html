@@ -797,7 +797,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-08a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-08b'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -3554,8 +3554,11 @@ function renderHistorico(){
     const iconePasta = urlPasta
       ? ' <a href="' + esc(urlPasta) + '" target="_blank" rel="noopener" title="Abrir pasta no SharePoint" onclick="event.stopPropagation()" style="text-decoration:none">📁</a>'
       : '';
+    const iconeExcel = urlPasta
+      ? ' <a href="#" onclick="event.stopPropagation(); abrirExcelHist(' + idx + '); return false" title="Abrir o Excel do orçamento (o mais recente da pasta)" style="text-decoration:none">📊</a>'
+      : '';
     return '<tr class="clicavel-linha" onclick="abrirHistEdit(' + idx + ')" title="Clica para ver e editar">' +
-      '<td><b>' + esc(it.codigo) + '</b>' + iconePasta + '</td>' +
+      '<td><b>' + esc(it.codigo) + '</b>' + iconePasta + iconeExcel + '</td>' +
       '<td>' + fonteChip + '</td>' +
       '<td title="' + esc(it.obra) + '">' + esc(it.obra.length > 48 ? it.obra.slice(0,47) + '…' : (it.obra || '—')) + '</td>' +
       '<td class="num">' + fmtEur(it.total) + '</td>' +
@@ -3637,6 +3640,32 @@ function kpiFiltroAno(a){
     sel.value = a;
   }
   renderHistorico();
+}
+
+/* Abre diretamente o Excel do orçamento que está dentro da pasta da obra.
+   A edge function encontra o mais recente (subpasta Orçamentos → raiz) —
+   não precisa de sessão Microsoft. Popup aberto já para não ser bloqueado. */
+async function abrirExcelHist(idx){
+  const it = histLista[idx];
+  if (!it) return;
+  const win = window.open('', '_blank');
+  try {
+    let drive = it.drive, item = it.item;
+    if (!drive || !item) {
+      const cod = String(it.codigo || '').match(/ocWG\d{2}_\d{3}/);
+      const pasta = cod ? pastasSharePoint.find(p => p.codigo === cod[0]) : null;
+      if (!pasta) throw new Error('não encontrei a pasta desta obra na listagem do SharePoint');
+      drive = pasta.drive; item = pasta.item;
+    }
+    toast('A procurar o Excel na pasta…');
+    const j = await (await fetch(FN_SPFICH + '?acao=excelDaPasta&drive=' + encodeURIComponent(drive) + '&item=' + encodeURIComponent(item), { headers: { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key } })).json();
+    if (!j.ok) throw new Error(j.message || 'não encontrei o Excel');
+    win.location = j.webUrl;
+    toast('📊 ' + j.nome + (j.total > 1 ? ' — o mais recente de ' + j.total : ''));
+  } catch (e) {
+    win.close();
+    toast('Excel: ' + e.message, 'erro');
+  }
 }
 
 /* Encontra o link da pasta SharePoint de um registo do histórico, cruzando
