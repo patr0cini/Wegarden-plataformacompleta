@@ -797,7 +797,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-08d'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-08e'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -3680,7 +3680,7 @@ async function abrirExcelHist(idx){
 const PROGRESSO_OPCOES = ['No SharePoint', 'Iniciado', 'Verificar', 'Corrigir', 'Pendente Fornecedores', 'Enviar', 'Adjudicado', 'Não Adjudicado'];
 
 function selProgressoHist(idx, it){
-  if (it.soSharePoint) return '<span class="chip roxo">No SharePoint</span>'; // pasta sem registo — nada onde gravar
+  // pastas sem registo também são editáveis: a 1ª escolha cria o registo (histProgresso)
   // sem progresso gravado, derivar do estado para a coluna única fazer sentido:
   // Adjudicado/Perdido mapeiam; Enviado/Rascunho/Em revisão aparecem como opção extra no topo
   const mapa = { 'Adjudicado': 'Adjudicado', 'Perdido': 'Não Adjudicado', 'No SharePoint': 'No SharePoint' };
@@ -3694,6 +3694,24 @@ async function histProgresso(idx, valor){
   const it = histLista[idx];
   if (!it) return;
   try {
+    if (it.soSharePoint) {
+      // pasta sem registo → criar o registo 2026 na tabela historico (mesmo padrão
+      // do editor: histCriarNovo2026) já com o progresso escolhido
+      const corpo = {
+        ano: 2026,
+        nome: (it.raw && it.raw.nome) ? it.raw.nome : (it.codigo + ' ' + (it.obra || '')).trim(),
+        valor: null, mes: '', requerente: '', responsavel: '',
+        concurso: '', visita: '',
+        adjudicado: valor === 'Adjudicado' ? 'Sim' : (valor === 'Não Adjudicado' ? 'Não' : ''),
+        data_arranque: '', email_envio: '', data_envio: '', grau_override: '',
+        progresso: valor,
+        notas: '', notas_hist: [], lembretes: []
+      };
+      await db(NOVO, 'historico', { method: 'POST', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify(corpo) });
+      toast('Registo criado para ' + it.codigo + ' — progresso: ' + valor);
+      await carregarHistoricoAntigo(); // a pasta deixa de ser «virtual» e re-renderiza
+      return;
+    }
     if (it.antigo) {
       const corpo = { progresso: valor };
       if (valor === 'Adjudicado') corpo.adjudicado = 'Sim';
