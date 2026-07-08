@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>We Garden · Manutenção</title>
+<style>
+:root{
+  --verde:#1F4D2E;
+  --verde-claro:#3D7A4E;
+  --verde-suave:#E8F0EA;
+  --cal:#F7F5F0;
+  --branco:#FFFFFF;
+  --tinta:#22241F;
+  --cinza:#6B6F66;
+  --linha:#E3E0D8;
+  --terra:#9C6B3F;
+  --erro:#A33B2E;
+  --erro-suave:#F6E7E4;
+  --ambar:#8A6D1F;
+  --ambar-suave:#F5EED8;
+  --azul:#2B5E73;
+  --azul-suave:#E2EEF2;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--cal);color:var(--tinta);font-size:14px;min-height:100vh}
+h1,h2,h3,.tab{font-family:'Trebuchet MS','Segoe UI',sans-serif}
+header{background:var(--branco);border-bottom:1px solid var(--linha);padding:0 28px;display:flex;align-items:center;gap:32px;position:sticky;top:0;z-index:50}
+.marca{font-family:Garamond,'Times New Roman',serif;font-size:22px;color:var(--verde);padding:16px 0;white-space:nowrap;display:flex;align-items:center;gap:8px}
+.marca small{font-family:'Trebuchet MS',sans-serif;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--cinza);border-left:1px solid var(--linha);padding-left:10px;margin-left:2px}
+nav{display:flex;gap:4px;flex:1}
+.tab{background:none;border:none;cursor:pointer;font-size:14px;color:var(--cinza);padding:20px 16px 17px;border-bottom:3px solid transparent;transition:color .15s,border-color .15s}
+.tab:hover{color:var(--tinta)}
+.tab.ativa{color:var(--verde);border-bottom-color:var(--verde);font-weight:700}
+#triagemChip{font-size:12px;color:var(--cinza);display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--linha);border-radius:99px;background:var(--cal);white-space:nowrap}
+#triagemChip .ponto{width:8px;height:8px;border-radius:50%;background:#C9C5BA;flex:none}
+#triagemChip.ok .ponto{background:var(--verde-claro)}
+#triagemChip.erro .ponto{background:var(--erro)}
+main{max-width:1280px;margin:0 auto;padding:28px}
+.painel{display:none}
+.painel.ativa{display:block}
+.painel-topo{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+.painel-topo h2{font-size:19px;color:var(--verde)}
+.painel-topo p{color:var(--cinza);font-size:13px;margin-top:3px}
+.vistas{display:flex;gap:6px;margin-bottom:14px}
+.vista{background:none;border:1px solid var(--linha);border-radius:99px;padding:6px 14px;font:inherit;font-size:12.5px;color:var(--cinza);cursor:pointer;font-weight:600}
+.vista.ativa{background:var(--verde);border-color:var(--verde);color:#fff}
+.kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.kpi{flex:1;min-width:128px;background:var(--branco);border:1px solid var(--linha);border-radius:10px;padding:10px 14px}
+.kpi-v{font-size:21px;font-weight:700;color:var(--verde);line-height:1.2}
+.kpi-l{font-size:11.5px;color:var(--cinza);margin-top:2px}
+.kpi-s{font-size:11px;color:var(--cinza);margin-top:1px}
+.kpi.clicavel{cursor:pointer}
+.kpi.clicavel:hover{border-color:var(--verde-claro);background:var(--verde-suave)}
+.kpi.kpi-on{border-color:var(--verde);background:var(--verde-suave)}
+.filtros{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+input[type=text],input[type=email],input[type=date],input[type=number],select,textarea{font:inherit;color:var(--tinta);border:1px solid var(--linha);border-radius:6px;padding:8px 11px;background:var(--branco);outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--verde-claro);box-shadow:0 0 0 3px rgba(61,122,78,.12)}
+.filtros input[type=text]{min-width:260px}
+.tabela-wrap{background:var(--branco);border:1px solid var(--linha);border-radius:10px;overflow:auto}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--cinza);font-weight:600;padding:11px 14px;border-bottom:1px solid var(--linha);background:var(--branco);position:sticky;top:0;white-space:nowrap}
+td{padding:10px 14px;border-bottom:1px solid #EFEDE6;vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+tbody tr.clicavel{cursor:pointer}
+tbody tr.clicavel:hover{background:#FAF9F4}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.vazio{padding:48px 20px;text-align:center;color:var(--cinza);font-size:13.5px}
+.chip{display:inline-block;font-size:11.5px;font-weight:600;padding:3px 10px;border-radius:99px;white-space:nowrap}
+.chip.cinza{background:#EFEDE6;color:var(--cinza)}
+.chip.ambar{background:var(--ambar-suave);color:var(--ambar)}
+.chip.azul{background:var(--azul-suave);color:var(--azul)}
+.chip.verde{background:var(--verde-suave);color:var(--verde)}
+.chip.verde-solido{background:var(--verde);color:#fff}
+.chip.erro{background:var(--erro-suave);color:var(--erro)}
+.chip.terra{background:#F2E9DF;color:var(--terra)}
+.sel-mini{padding:4px 8px;font-size:12.5px;max-width:170px}
+.btn{font:inherit;cursor:pointer;border-radius:7px;padding:8px 16px;border:1px solid transparent;transition:background .15s,border-color .15s;white-space:nowrap}
+.btn.primario{background:var(--verde);color:#fff;font-weight:600}
+.btn.primario:hover{background:#173E24}
+.btn.ghost{background:var(--branco);border-color:var(--linha);color:var(--tinta)}
+.btn.ghost:hover{border-color:var(--verde-claro);color:var(--verde)}
+.btn.mini{padding:4px 10px;font-size:12.5px}
+.btn.perigo{background:none;border:none;color:var(--erro);font-size:15px;padding:2px 6px;cursor:pointer;opacity:.55}
+.btn.perigo:hover{opacity:1}
+.btn:disabled{opacity:.5;cursor:default}
+.acao{background:none;border:none;cursor:pointer;font-size:15px;padding:2px 5px;opacity:.75}
+.acao:hover{opacity:1}
+/* Modal */
+.modal-fundo{display:none;position:fixed;inset:0;background:rgba(34,36,31,.45);z-index:100;align-items:flex-start;justify-content:center;padding:6vh 16px}
+.modal-fundo.aberto{display:flex}
+.modal{background:var(--branco);border-radius:12px;max-width:640px;width:100%;max-height:86vh;overflow:auto;padding:22px 24px;box-shadow:0 24px 60px rgba(34,36,31,.25)}
+.modal h3{color:var(--verde);font-size:17px;margin-bottom:14px}
+.modal .grelha{display:grid;grid-template-columns:repeat(2,1fr);gap:12px 14px}
+.modal label{display:flex;flex-direction:column;gap:5px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--cinza);font-weight:600}
+.modal label.c2{grid-column:span 2}
+.modal textarea{resize:vertical;min-height:56px}
+.modal .rodape{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
+/* Ferramenta embebida */
+#orcEditor{display:none}
+#orcEditor.aberto{display:block}
+#orcBarra{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+#orcBarra .info{font-size:13px;color:var(--cinza)}
+#orcFrame{width:100%;height:calc(100vh - 210px);min-height:560px;border:1px solid var(--linha);border-radius:10px;background:#fff}
+/* Toast */
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--tinta);color:#fff;padding:10px 20px;border-radius:8px;font-size:13.5px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:200;max-width:80vw}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+footer{max-width:1280px;margin:0 auto;padding:10px 28px 26px;color:var(--cinza);font-size:11px;display:flex;justify-content:space-between}
+@media (max-width:720px){
+  header{padding:0 14px;gap:12px;overflow-x:auto}
+  main{padding:16px 12px}
+  .modal .grelha{grid-template-columns:1fr}
+  .modal label.c2{grid-column:span 1}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="marca">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5-4 8-8.5 8-13a8 8 0 1 0-16 0c0 4.5 3 9 8 13z"/><path d="M12 8v6M9 11h6"/></svg>
+    We Garden <small>Manutenção</small>
+  </div>
+  <nav>
+    <button class="tab ativa" data-tab="pipeline" onclick="mudarTab('pipeline')">Pipeline</button>
+    <button class="tab" data-tab="orcamentacao" onclick="mudarTab('orcamentacao')">Orçamentação</button>
+    <button class="tab" data-tab="historico" onclick="mudarTab('historico')">Histórico</button>
+  </nav>
+  <div id="triagemChip"><span class="ponto"></span><span id="triagemTxt">triagem —</span></div>
+</header>
+
+<main>
+
+<!-- ==================== PIPELINE ==================== -->
+<section class="painel ativa" id="painel-pipeline">
+  <div class="painel-topo">
+    <div>
+      <h2>Pedidos de manutenção</h2>
+      <p>Telefone, email e site — tudo no mesmo sítio.</p>
+    </div>
+    <button class="btn primario" onclick="abrirNovoPedido()">+ Novo pedido</button>
+  </div>
+  <div class="vistas" id="vistasPip"></div>
+  <div class="kpis" id="kpisPip"></div>
+  <div class="filtros">
+    <input type="text" id="fPesq" placeholder="Pesquisar nome, contacto, localidade…" oninput="renderPipeline()">
+    <select id="fEstado" onchange="renderPipeline()"><option value="">Estado: todos</option></select>
+    <select id="fOrigem" onchange="renderPipeline()">
+      <option value="">Origem: todas</option>
+      <option value="telefone">📞 Telefone</option>
+      <option value="email">✉️ Email</option>
+      <option value="site">🌐 Site</option>
+    </select>
+  </div>
+  <div class="tabela-wrap">
+    <table>
+      <thead><tr>
+        <th>ID</th><th>Data</th><th>Nome</th><th>Contacto</th><th>Localidade</th>
+        <th>Tipo</th><th>Period.</th><th>Origem</th><th>Estado</th><th>Resp.</th><th></th>
+      </tr></thead>
+      <tbody id="corpoPipeline"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== ORÇAMENTAÇÃO ==================== -->
+<section class="painel" id="painel-orcamentacao">
+  <div id="orcLista">
+    <div class="painel-topo">
+      <div>
+        <h2>Orçamentos</h2>
+        <p>Simulador + gerador de propostas, ligados à pipeline.</p>
+      </div>
+      <button class="btn primario" onclick="novoOrcamento()">+ Novo orçamento</button>
+    </div>
+    <div class="tabela-wrap">
+      <table>
+        <thead><tr>
+          <th>ID</th><th>Cliente</th><th>Pedido</th><th class="num">Valor mensal</th>
+          <th>Period.</th><th>Estado</th><th>Atualizado</th><th></th>
+        </tr></thead>
+        <tbody id="corpoOrcamentos"></tbody>
+      </table>
+    </div>
+  </div>
+  <div id="orcEditor">
+    <div id="orcBarra">
+      <button class="btn ghost" onclick="fecharFerramenta()">← Voltar à lista</button>
+      <span class="info" id="orcInfo"></span>
+      <span class="info" style="margin-left:auto">💾 usa o botão «Gravar na plataforma» dentro da ferramenta</span>
+    </div>
+    <iframe id="orcFrame" src="about:blank"></iframe>
+  </div>
+</section>
+
+<!-- ==================== HISTÓRICO ==================== -->
+<section class="painel" id="painel-historico">
+  <div class="painel-topo">
+    <div>
+      <h2>Histórico</h2>
+      <p>Propostas enviadas, contratos adjudicados e valor mensal contratado (MRR).</p>
+    </div>
+  </div>
+  <div class="kpis" id="kpisHist"></div>
+  <div class="filtros">
+    <input type="text" id="hPesq" placeholder="Pesquisar cliente…" oninput="renderHistorico()">
+    <select id="hAno" onchange="renderHistorico()"><option value="">Ano: todos</option></select>
+    <select id="hEstado" onchange="renderHistorico()">
+      <option value="">Estado: todos</option>
+      <option>Enviada</option><option>Adjudicada</option><option>Perdida</option><option>Rascunho</option>
+    </select>
+  </div>
+  <div class="tabela-wrap">
+    <table>
+      <thead><tr>
+        <th>Fonte</th><th>Cliente</th><th>Localidade</th><th class="num">Valor mensal</th>
+        <th>Period.</th><th>Enviado em</th><th>Estado</th><th>Resp.</th><th>Notas</th><th></th>
+      </tr></thead>
+      <tbody id="corpoHistorico"></tbody>
+    </table>
+  </div>
+</section>
+
+</main>
+
+<!-- ==================== MODAL PEDIDO ==================== -->
+<div class="modal-fundo" id="modalPedido">
+  <div class="modal">
+    <h3 id="mpTitulo">Novo pedido</h3>
+    <div class="grelha">
+      <label>Nome / cliente<input type="text" id="mpNome" placeholder="Nome de quem liga"></label>
+      <label>Telefone<input type="text" id="mpTelefone"></label>
+      <label>Email<input type="email" id="mpEmail"></label>
+      <label>Localidade<input type="text" id="mpLocalidade"></label>
+      <label class="c2">Morada<input type="text" id="mpMorada" placeholder="Rua, nº, urbanização…"></label>
+      <label>Tipo de espaço
+        <select id="mpTipo">
+          <option value="">—</option>
+          <option>Condomínio</option><option>Particular</option><option>Empresa</option>
+          <option>Hotel</option><option>Outro</option>
+        </select>
+      </label>
+      <label>Periodicidade desejada
+        <select id="mpPeriodicidade">
+          <option value="">Não sabe / a definir</option>
+          <option value="diario">Diário (2ª a 6ª)</option>
+          <option value="3x">3× por semana</option>
+          <option value="2x">2× por semana</option>
+          <option value="1e5x">1 dia + ½ dia / semana</option>
+          <option value="semanal">Semanal</option>
+          <option value="quinzenal">Quinzenal</option>
+          <option value="mensal">Mensal</option>
+        </select>
+      </label>
+      <label>Área aproximada<input type="text" id="mpArea" placeholder="ex. 500 m², moradia c/ relvado"></label>
+      <label>Origem
+        <select id="mpOrigem">
+          <option value="telefone">📞 Telefone</option>
+          <option value="email">✉️ Email</option>
+          <option value="site">🌐 Site</option>
+        </select>
+      </label>
+      <label id="mpLblEstado">Estado
+        <select id="mpEstado"></select>
+      </label>
+      <label>Responsável<input type="text" id="mpResp"></label>
+      <label class="c2">Notas<textarea id="mpNotas" placeholder="O que foi dito na chamada, contexto…"></textarea></label>
+    </div>
+    <div class="rodape">
+      <button class="btn ghost" onclick="fecharModal('modalPedido')">Cancelar</button>
+      <button class="btn primario" id="mpGuardar" onclick="guardarPedido()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== MODAL HISTÓRICO ==================== -->
+<div class="modal-fundo" id="modalHist">
+  <div class="modal">
+    <h3 id="mhTitulo">Editar registo</h3>
+    <div class="grelha">
+      <label class="c2">Cliente<input type="text" id="mhCliente"></label>
+      <label>Localidade<input type="text" id="mhLocalidade"></label>
+      <label>Valor mensal (€ s/ IVA)<input type="number" id="mhValor" step="0.01"></label>
+      <label>Periodicidade<input type="text" id="mhPeriodicidade"></label>
+      <label>Estado
+        <select id="mhEstado">
+          <option>Rascunho</option><option>Enviada</option><option>Adjudicada</option><option>Perdida</option>
+        </select>
+      </label>
+      <label>Enviado em<input type="date" id="mhDataEnvio"></label>
+      <label>Início do contrato<input type="date" id="mhDataInicio"></label>
+      <label>Responsável<input type="text" id="mhResp"></label>
+      <label class="c2">Notas<textarea id="mhNotas"></textarea></label>
+    </div>
+    <div class="rodape">
+      <button class="btn ghost" onclick="fecharModal('modalHist')">Cancelar</button>
+      <button class="btn primario" onclick="guardarHist()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<footer><span>We Garden · Plataforma de Manutenção</span><span id="rodapeBuild"></span></footer>
+
+<script>
+const BUILD = '2026-07-08a'; // ← actualizar em CADA publicação (data + letra)
+console.log('We Garden Manutenção · build ' + BUILD);
+document.getElementById('rodapeBuild').textContent = 'build ' + BUILD;
+
+const SB_URL = 'https://kgpwpzluqnekqckltkys.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtncHdwemx1cW5la3Fja2x0a3lzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNTg1NzcsImV4cCI6MjA5NDkzNDU3N30.pno5YwPb1z2dphWX00eenX1t2aDCbrFO6l1Knk7uyhI';
+const FERRAMENTA = 'ferramenta-manutencao.html';
+
+const H = { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY };
+async function sbGet(tabela, params) {
+  const r = await fetch(SB_URL + '/rest/v1/' + tabela + '?' + params, { headers: H });
+  if (!r.ok) throw new Error(tabela + ' GET ' + r.status + ': ' + await r.text());
+  return r.json();
+}
+async function sbIns(tabela, row) {
+  const r = await fetch(SB_URL + '/rest/v1/' + tabela, {
+    method: 'POST', headers: { ...H, 'Content-Type': 'application/json', Prefer: 'return=representation' },
+    body: JSON.stringify(row)
+  });
+  if (!r.ok) throw new Error(tabela + ' INSERT ' + r.status + ': ' + await r.text());
+  return (await r.json())[0];
+}
+async function sbUpd(tabela, filtro, patch) {
+  const r = await fetch(SB_URL + '/rest/v1/' + tabela + '?' + filtro, {
+    method: 'PATCH', headers: { ...H, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+    body: JSON.stringify(patch)
+  });
+  if (!r.ok) throw new Error(tabela + ' PATCH ' + r.status + ': ' + await r.text());
+}
+async function sbDel(tabela, filtro) {
+  const r = await fetch(SB_URL + '/rest/v1/' + tabela + '?' + filtro, { method: 'DELETE', headers: H });
+  if (!r.ok) throw new Error(tabela + ' DELETE ' + r.status + ': ' + await r.text());
+}
+
+const fmtEur = v => (v == null || v === '' || isNaN(v)) ? '—'
+  : Number(v).toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' });
+const fmtData = d => { if (!d) return '—'; const x = new Date(d); return isNaN(x) ? '—' : x.toLocaleDateString('pt-PT'); };
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let _toastT = null;
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('on');
+  clearTimeout(_toastT); _toastT = setTimeout(() => t.classList.remove('on'), 3200);
+}
+
+/* ---------- estado global ---------- */
+let pedidos = [];
+let orcamentos = [];
+let historico = [];      // man_historico (legado)
+let pipVista = 'ativos';
+let kpiFiltroPip = '';
+let orcAtual = null;     // id do orçamento aberto na ferramenta
+let sujo = false;        // ferramenta aberta com alterações por gravar
+let editandoPedido = null;
+let editandoHist = null; // {fonte:'orc'|'hist', id}
+
+const ESTADOS_PIP = ['Não iniciado','Em contacto','Visita marcada','Em orçamentação','Orçamentado','Para rever','Fora de Zona','Arquivado'];
+const CHIP_ESTADO = {'Não iniciado':'cinza','Em contacto':'azul','Visita marcada':'ambar','Em orçamentação':'terra','Orçamentado':'verde','Para rever':'ambar','Fora de Zona':'erro','Arquivado':'cinza'};
+const ORIGEM_ICO = { telefone: '📞', email: '✉️', site: '🌐' };
+const PER_LABEL = { diario:'Diário', '3x':'3×/sem', '2x':'2×/sem', '1e5x':'1,5 dia/sem', semanal:'Semanal', quinzenal:'Quinzenal', mensal:'Mensal' };
+
+window.addEventListener('beforeunload', e => { if (sujo) { e.preventDefault(); e.returnValue = ''; } });
+
+function mudarTab(t) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('ativa', b.dataset.tab === t));
+  document.querySelectorAll('.painel').forEach(p => p.classList.toggle('ativa', p.id === 'painel-' + t));
+}
+function fecharModal(id) { document.getElementById(id).classList.remove('aberto'); }
+
+/* ==================== PIPELINE ==================== */
+async function carregarPedidos() {
+  pedidos = await sbGet('man_pedidos', 'select=*&order=criado_em.desc');
+  renderPipeline();
+}
+function pedidosDaVista() {
+  if (pipVista === 'rever') return pedidos.filter(p => p.estado === 'Para rever');
+  if (pipVista === 'fora')  return pedidos.filter(p => p.estado === 'Fora de Zona');
+  return pedidos.filter(p => !['Para rever','Fora de Zona','Arquivado'].includes(p.estado));
+}
+function renderPipeline() {
+  // vistas
+  const nRever = pedidos.filter(p => p.estado === 'Para rever').length;
+  const nFora = pedidos.filter(p => p.estado === 'Fora de Zona').length;
+  const nArq = pedidos.filter(p => p.estado === 'Arquivado').length;
+  document.getElementById('vistasPip').innerHTML =
+    `<button class="vista ${pipVista==='ativos'?'ativa':''}" onclick="mudarVistaPip('ativos')">Ativos</button>` +
+    `<button class="vista ${pipVista==='rever'?'ativa':''}" onclick="mudarVistaPip('rever')">❓ Para rever (${nRever})</button>` +
+    `<button class="vista ${pipVista==='fora'?'ativa':''}" onclick="mudarVistaPip('fora')">🚫 Fora de Zona (${nFora})</button>` +
+    (nArq ? `<button class="vista ${pipVista==='arq'?'ativa':''}" onclick="mudarVistaPip('arq')">🗂 Arquivados (${nArq})</button>` : '');
+
+  let lista = pipVista === 'arq' ? pedidos.filter(p => p.estado === 'Arquivado') : pedidosDaVista();
+
+  // KPIs (sobre a vista de ativos)
+  const ativos = pedidos.filter(p => !['Para rever','Fora de Zona','Arquivado'].includes(p.estado));
+  const seteDias = Date.now() - 7 * 24 * 3600 * 1000;
+  const novos7 = ativos.filter(p => new Date(p.criado_em).getTime() >= seteDias).length;
+  const porEstado = {};
+  ativos.forEach(p => porEstado[p.estado] = (porEstado[p.estado] || 0) + 1);
+  let kpis = `<div class="kpi"><div class="kpi-v">${ativos.length}</div><div class="kpi-l">Ativos</div><div class="kpi-s">${novos7} novos em 7 dias</div></div>`;
+  for (const e of ESTADOS_PIP.slice(0, 5)) {
+    const n = porEstado[e] || 0;
+    kpis += `<div class="kpi clicavel ${kpiFiltroPip===e?'kpi-on':''}" onclick="kpiPip('${e}')"><div class="kpi-v">${n}</div><div class="kpi-l">${e}</div></div>`;
+  }
+  document.getElementById('kpisPip').innerHTML = kpis;
+
+  // filtros
+  const fp = document.getElementById('fPesq').value.trim().toLowerCase();
+  const fe = document.getElementById('fEstado').value || kpiFiltroPip;
+  const fo = document.getElementById('fOrigem').value;
+  if (fe) lista = lista.filter(p => p.estado === fe);
+  if (fo) lista = lista.filter(p => p.origem === fo);
+  if (fp) lista = lista.filter(p =>
+    [p.id, p.nome, p.email, p.telefone, p.localidade, p.morada, p.tipo_espaco, p.notas, p.mensagem]
+      .some(v => v && String(v).toLowerCase().includes(fp)));
+
+  const tb = document.getElementById('corpoPipeline');
+  if (!lista.length) { tb.innerHTML = `<tr><td colspan="11" class="vazio">Sem pedidos nesta vista.</td></tr>`; return; }
+  tb.innerHTML = lista.map(p => {
+    const contacto = [p.telefone, p.email].filter(Boolean).join('<br>');
+    const opts = ESTADOS_PIP.map(e => `<option ${e===p.estado?'selected':''}>${e}</option>`).join('');
+    return `<tr class="clicavel" onclick="abrirEditarPedido('${p.id}')">
+      <td style="white-space:nowrap">${esc(p.id)}</td>
+      <td style="white-space:nowrap">${fmtData(p.data || p.criado_em)}</td>
+      <td><b>${esc(p.nome) || '—'}</b></td>
+      <td style="font-size:12.5px">${contacto || '—'}</td>
+      <td>${esc(p.localidade) || '—'}${p.fora_zona ? ' ⚠' : ''}</td>
+      <td>${esc(p.tipo_espaco) || '—'}</td>
+      <td>${PER_LABEL[p.periodicidade] || '—'}</td>
+      <td title="${esc(p.mailbox || p.origem)}">${ORIGEM_ICO[p.origem] || ''} ${esc(p.origem)}</td>
+      <td onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">
+        <select class="sel-mini" onchange="mudarEstadoPedido('${p.id}', this.value)">${opts}</select>
+      </td>
+      <td>${esc(p.resp) || '—'}</td>
+      <td style="white-space:nowrap" onclick="event.stopPropagation()">
+        <button class="acao" title="Orçamentar" onclick="orcamentarPedido('${p.id}')">🧮</button>
+        <button class="btn perigo" title="Apagar" onclick="apagarPedido('${p.id}')">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+function mudarVistaPip(v) { pipVista = v; kpiFiltroPip = ''; renderPipeline(); }
+function kpiPip(e) { kpiFiltroPip = (kpiFiltroPip === e) ? '' : e; document.getElementById('fEstado').value = ''; renderPipeline(); }
+async function mudarEstadoPedido(id, estado) {
+  try { await sbUpd('man_pedidos', 'id=eq.' + encodeURIComponent(id), { estado, atualizado_em: new Date().toISOString() }); }
+  catch (e) { toast('Erro: ' + e.message); }
+  const p = pedidos.find(x => x.id === id); if (p) p.estado = estado;
+  renderPipeline();
+}
+async function apagarPedido(id) {
+  if (!confirm('Apagar o pedido ' + id + '? Esta ação não tem volta.')) return;
+  try { await sbDel('man_pedidos', 'id=eq.' + encodeURIComponent(id)); pedidos = pedidos.filter(p => p.id !== id); renderPipeline(); toast('Pedido apagado.'); }
+  catch (e) { toast('Erro: ' + e.message); }
+}
+
+/* ----- modal novo/editar pedido ----- */
+function preencherSelEstados() {
+  const s = document.getElementById('mpEstado');
+  s.innerHTML = ESTADOS_PIP.map(e => `<option>${e}</option>`).join('');
+}
+function abrirNovoPedido() {
+  editandoPedido = null;
+  document.getElementById('mpTitulo').textContent = 'Novo pedido';
+  ['mpNome','mpTelefone','mpEmail','mpLocalidade','mpMorada','mpArea','mpResp','mpNotas'].forEach(i => document.getElementById(i).value = '');
+  document.getElementById('mpTipo').value = '';
+  document.getElementById('mpPeriodicidade').value = '';
+  document.getElementById('mpOrigem').value = 'telefone';
+  preencherSelEstados();
+  document.getElementById('mpEstado').value = 'Não iniciado';
+  document.getElementById('modalPedido').classList.add('aberto');
+  setTimeout(() => document.getElementById('mpNome').focus(), 50);
+}
+function abrirEditarPedido(id) {
+  const p = pedidos.find(x => x.id === id); if (!p) return;
+  editandoPedido = id;
+  document.getElementById('mpTitulo').textContent = 'Editar ' + id;
+  document.getElementById('mpNome').value = p.nome || '';
+  document.getElementById('mpTelefone').value = p.telefone || '';
+  document.getElementById('mpEmail').value = p.email || '';
+  document.getElementById('mpLocalidade').value = p.localidade || '';
+  document.getElementById('mpMorada').value = p.morada || '';
+  document.getElementById('mpTipo').value = p.tipo_espaco || '';
+  document.getElementById('mpPeriodicidade').value = p.periodicidade || '';
+  document.getElementById('mpArea').value = p.area_aprox || '';
+  document.getElementById('mpOrigem').value = p.origem || 'telefone';
+  preencherSelEstados();
+  document.getElementById('mpEstado').value = p.estado || 'Não iniciado';
+  document.getElementById('mpResp').value = p.resp || '';
+  document.getElementById('mpNotas').value = (p.notas || '') + (p.mensagem ? (p.notas ? '\n---\n' : '') + p.mensagem : '');
+  document.getElementById('modalPedido').classList.add('aberto');
+}
+async function guardarPedido() {
+  const row = {
+    nome: document.getElementById('mpNome').value.trim(),
+    telefone: document.getElementById('mpTelefone').value.trim(),
+    email: document.getElementById('mpEmail').value.trim(),
+    localidade: document.getElementById('mpLocalidade').value.trim(),
+    morada: document.getElementById('mpMorada').value.trim(),
+    tipo_espaco: document.getElementById('mpTipo').value,
+    periodicidade: document.getElementById('mpPeriodicidade').value,
+    area_aprox: document.getElementById('mpArea').value.trim(),
+    origem: document.getElementById('mpOrigem').value,
+    estado: document.getElementById('mpEstado').value,
+    resp: document.getElementById('mpResp').value.trim(),
+    notas: document.getElementById('mpNotas').value.trim(),
+    atualizado_em: new Date().toISOString()
+  };
+  if (!row.nome && !row.telefone && !row.email) { toast('Preenche pelo menos o nome ou um contacto.'); return; }
+  const btn = document.getElementById('mpGuardar'); btn.disabled = true;
+  try {
+    if (editandoPedido) {
+      // notas do modal incluem a mensagem original concatenada — não sobrescrever mensagem
+      await sbUpd('man_pedidos', 'id=eq.' + encodeURIComponent(editandoPedido), row);
+      toast('Pedido ' + editandoPedido + ' atualizado.');
+    } else {
+      const novo = await sbIns('man_pedidos', row);
+      toast('Pedido ' + novo.id + ' criado.');
+    }
+    fecharModal('modalPedido');
+    await carregarPedidos();
+  } catch (e) { toast('Erro ao gravar: ' + e.message); }
+  btn.disabled = false;
+}
+
+/* ==================== ORÇAMENTAÇÃO ==================== */
+async function carregarOrcamentos() {
+  orcamentos = await sbGet('man_orcamentos', 'select=*&order=atualizado_em.desc.nullslast');
+  renderOrcamentos();
+}
+function renderOrcamentos() {
+  const tb = document.getElementById('corpoOrcamentos');
+  if (!orcamentos.length) { tb.innerHTML = `<tr><td colspan="8" class="vazio">Ainda sem orçamentos. Usa «🧮 Orçamentar» num pedido da pipeline ou «+ Novo orçamento».</td></tr>`; return; }
+  tb.innerHTML = orcamentos.map(o => {
+    const opts = ['Rascunho','Enviada','Adjudicada','Perdida'].map(e => `<option ${e===o.estado?'selected':''}>${e}</option>`).join('');
+    return `<tr>
+      <td style="white-space:nowrap">${esc(o.id)}</td>
+      <td><b>${esc(o.cliente) || '—'}</b></td>
+      <td style="white-space:nowrap">${esc(o.pedido_id) || '—'}</td>
+      <td class="num">${fmtEur(o.valor_mensal)}</td>
+      <td>${PER_LABEL[o.periodicidade] || esc(o.periodicidade) || '—'}</td>
+      <td><select class="sel-mini" onchange="mudarEstadoOrc('${o.id}', this.value)">${opts}</select></td>
+      <td style="white-space:nowrap">${fmtData(o.atualizado_em)}</td>
+      <td style="white-space:nowrap">
+        <button class="acao" title="Abrir na ferramenta" onclick="abrirFerramenta('${o.id}')">🧮</button>
+        ${o.link_partilha ? `<button class="acao" title="Copiar link de partilha" onclick="copiarLink('${o.id}')">🔗</button>` : ''}
+        <button class="btn perigo" title="Apagar" onclick="apagarOrc('${o.id}')">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+async function mudarEstadoOrc(id, estado) {
+  const patch = { estado, atualizado_em: new Date().toISOString() };
+  if (estado === 'Enviada') patch.data_envio = new Date().toISOString().slice(0, 10);
+  try { await sbUpd('man_orcamentos', 'id=eq.' + encodeURIComponent(id), patch); }
+  catch (e) { toast('Erro: ' + e.message); }
+  const o = orcamentos.find(x => x.id === id);
+  if (o) { o.estado = estado; if (patch.data_envio) o.data_envio = patch.data_envio; }
+  renderOrcamentos(); carregarHistorico();
+}
+function copiarLink(id) {
+  const o = orcamentos.find(x => x.id === id); if (!o || !o.link_partilha) return;
+  navigator.clipboard.writeText(o.link_partilha).then(() => toast('Link copiado.'))
+    .catch(() => prompt('Copia o link:', o.link_partilha));
+}
+async function apagarOrc(id) {
+  if (!confirm('Apagar o orçamento ' + id + '?')) return;
+  try { await sbDel('man_orcamentos', 'id=eq.' + encodeURIComponent(id)); orcamentos = orcamentos.filter(o => o.id !== id); renderOrcamentos(); toast('Orçamento apagado.'); }
+  catch (e) { toast('Erro: ' + e.message); }
+}
+async function novoOrcamento() {
+  try {
+    const novo = await sbIns('man_orcamentos', { estado: 'Rascunho' });
+    orcamentos.unshift(novo);
+    abrirFerramenta(novo.id);
+  } catch (e) { toast('Erro: ' + e.message); }
+}
+async function orcamentarPedido(id) {
+  const p = pedidos.find(x => x.id === id); if (!p) return;
+  // reutiliza rascunho existente do mesmo pedido, se houver
+  let o = orcamentos.find(x => x.pedido_id === id && x.estado === 'Rascunho');
+  try {
+    if (!o) {
+      const tipoCliente = ['Condomínio','Particular','Empresa'].includes(p.tipo_espaco) ? p.tipo_espaco : 'Condomínio';
+      o = await sbIns('man_orcamentos', {
+        pedido_id: id, cliente: p.nome || '', tipo_cliente: tipoCliente,
+        periodicidade: p.periodicidade || '', estado: 'Rascunho'
+      });
+      orcamentos.unshift(o);
+    }
+    if (p.estado === 'Não iniciado' || p.estado === 'Em contacto') await mudarEstadoPedido(id, 'Em orçamentação');
+    mudarTab('orcamentacao');
+    abrirFerramenta(o.id);
+  } catch (e) { toast('Erro: ' + e.message); }
+}
+function abrirFerramenta(id) {
+  const o = orcamentos.find(x => x.id === id); if (!o) return;
+  orcAtual = id;
+  const params = new URLSearchParams();
+  params.set('emb', '1');
+  if (o.cliente) params.set('n', o.cliente);
+  if (o.tipo_cliente) params.set('t', o.tipo_cliente);
+  if (o.periodicidade) params.set('per', o.periodicidade);
+  if (o.pessoas) params.set('tm', o.pessoas);
+  if (o.valor_mensal) params.set('p', o.valor_mensal);
+  if (o.config && o.config.s) params.set('s', o.config.s);
+  if (o.config && o.config.l) params.set('l', o.config.l);
+  document.getElementById('orcFrame').src = FERRAMENTA + '#' + params.toString();
+  document.getElementById('orcInfo').textContent = id + (o.pedido_id ? ' · pedido ' + o.pedido_id : '') + (o.cliente ? ' · ' + o.cliente : '');
+  document.getElementById('orcLista').style.display = 'none';
+  document.getElementById('orcEditor').classList.add('aberto');
+  mudarTab('orcamentacao');
+  sujo = true;
+}
+function fecharFerramenta() {
+  if (sujo && !confirm('Se fizeste alterações na ferramenta sem «Gravar na plataforma», perdem-se. Fechar mesmo?')) return;
+  sujo = false;
+  document.getElementById('orcFrame').src = 'about:blank';
+  document.getElementById('orcEditor').classList.remove('aberto');
+  document.getElementById('orcLista').style.display = '';
+  orcAtual = null;
+  renderOrcamentos();
+}
+window.addEventListener('message', async ev => {
+  const d = ev.data;
+  if (!d) return;
+  // handshake: a ferramenta anuncia que carregou → enviar a configuração do orçamento aberto
+  if (d.tipo === 'wgman-pronto' && orcAtual) {
+    const o = orcamentos.find(x => x.id === orcAtual);
+    if (o) {
+      const cfg = {
+        n: o.cliente || '', t: o.tipo_cliente || '', per: o.periodicidade || '',
+        tm: o.pessoas || '', p: o.valor_mensal || '',
+        s: (o.config && o.config.s) || (Array.isArray(o.seccoes) ? o.seccoes.join(',') : ''),
+        l: (o.config && o.config.l) || o.lingua || ''
+      };
+      document.getElementById('orcFrame').contentWindow.postMessage({ tipo: 'wgman-config', config: cfg }, '*');
+    }
+    return;
+  }
+  if (d.tipo !== 'wgman-orcamento' || !orcAtual) return;
+  const patch = {
+    cliente: d.cliente || '', tipo_cliente: d.tipoCliente || '', lingua: d.lingua || 'pt',
+    seccoes: d.seccoes || [], pessoas: d.pessoas || null, periodicidade: d.periodicidade || '',
+    valor_mensal: d.valor || null, link_partilha: d.link || '', config: d.config || {},
+    atualizado_em: new Date().toISOString()
+  };
+  try {
+    await sbUpd('man_orcamentos', 'id=eq.' + encodeURIComponent(orcAtual), patch);
+    const o = orcamentos.find(x => x.id === orcAtual);
+    if (o) Object.assign(o, patch);
+    // reflete o valor no pedido ligado
+    if (o && o.pedido_id) {
+      const p = pedidos.find(x => x.id === o.pedido_id);
+      if (p && p.estado !== 'Orçamentado') await mudarEstadoPedido(o.pedido_id, 'Orçamentado');
+    }
+    sujo = false;
+    toast('Orçamento ' + orcAtual + ' gravado na plataforma ✓');
+    carregarHistorico();
+  } catch (e) { toast('Erro ao gravar orçamento: ' + e.message); }
+});
+
+/* ==================== HISTÓRICO ==================== */
+async function carregarHistorico() {
+  historico = await sbGet('man_historico', 'select=*&order=ano.desc.nullslast,cliente.asc');
+  renderHistorico();
+}
+function linhasHistorico() {
+  const doOrc = orcamentos.map(o => ({
+    fonte: 'orc', id: o.id, ano: o.data_envio ? +o.data_envio.slice(0, 4) : new Date(o.criado_em).getFullYear(),
+    cliente: o.cliente, localidade: '', valor: o.valor_mensal, periodicidade: PER_LABEL[o.periodicidade] || o.periodicidade,
+    data_envio: o.data_envio, estado: o.estado, resp: o.responsavel, notas: o.notas
+  }));
+  const doHist = historico.map(h => ({
+    fonte: 'hist', id: h.id, ano: h.ano, cliente: h.cliente, localidade: h.localidade,
+    valor: h.valor_mensal, periodicidade: h.periodicidade, data_envio: h.data_envio,
+    estado: h.adjudicado === 'Sim' ? 'Adjudicada' : (h.adjudicado === 'Não' ? 'Perdida' : (h.adjudicado || 'Enviada')),
+    resp: h.responsavel, notas: h.notas
+  }));
+  return doOrc.concat(doHist);
+}
+function renderHistorico() {
+  const todas = linhasHistorico();
+
+  // opções de ano
+  const anos = [...new Set(todas.map(l => l.ano).filter(Boolean))].sort((a, b) => b - a);
+  const selAno = document.getElementById('hAno');
+  const anoAtual = selAno.value;
+  selAno.innerHTML = '<option value="">Ano: todos</option>' + anos.map(a => `<option ${String(a)===anoAtual?'selected':''}>${a}</option>`).join('');
+
+  const fp = document.getElementById('hPesq').value.trim().toLowerCase();
+  const fa = selAno.value;
+  const fe = document.getElementById('hEstado').value;
+  let lista = todas;
+  if (fa) lista = lista.filter(l => String(l.ano) === fa);
+  if (fe) lista = lista.filter(l => l.estado === fe);
+  if (fp) lista = lista.filter(l => [l.cliente, l.localidade, l.notas].some(v => v && String(v).toLowerCase().includes(fp)));
+
+  // KPIs (sobre a lista filtrada)
+  const n = lista.length;
+  const env = lista.filter(l => l.estado === 'Enviada');
+  const adj = lista.filter(l => l.estado === 'Adjudicada');
+  const per = lista.filter(l => l.estado === 'Perdida');
+  const mrr = adj.reduce((s, l) => s + (Number(l.valor) || 0), 0);
+  const mrrPer = per.reduce((s, l) => s + (Number(l.valor) || 0), 0);
+  const decid = adj.length + per.length;
+  const taxaN = decid ? Math.round(100 * adj.length / decid) : null;
+  const taxaV = (mrr + mrrPer) > 0 ? Math.round(100 * mrr / (mrr + mrrPer)) : null;
+  document.getElementById('kpisHist').innerHTML =
+    `<div class="kpi"><div class="kpi-v">${n}</div><div class="kpi-l">Propostas</div></div>` +
+    `<div class="kpi"><div class="kpi-v">${env.length}</div><div class="kpi-l">Enviadas, à espera</div></div>` +
+    `<div class="kpi"><div class="kpi-v">${adj.length}</div><div class="kpi-l">Adjudicadas</div><div class="kpi-s">${fmtEur(mrr)}/mês contratado</div></div>` +
+    `<div class="kpi"><div class="kpi-v">${per.length}</div><div class="kpi-l">Perdidas</div><div class="kpi-s">${fmtEur(mrrPer)}/mês</div></div>` +
+    `<div class="kpi"><div class="kpi-v">${taxaN == null ? '—' : taxaN + '%'}</div><div class="kpi-l">Taxa de adjudicação</div><div class="kpi-s">${taxaV == null ? '' : taxaV + '% em valor mensal'}</div></div>`;
+
+  const tb = document.getElementById('corpoHistorico');
+  if (!lista.length) { tb.innerHTML = `<tr><td colspan="10" class="vazio">Sem registos.</td></tr>`; return; }
+  const chipEstado = { Rascunho: 'cinza', Enviada: 'azul', Adjudicada: 'verde-solido', Perdida: 'erro' };
+  tb.innerHTML = lista.map(l => `<tr class="clicavel" onclick="abrirHistEdit('${l.fonte}','${l.id}')">
+    <td><span class="chip ${l.fonte==='orc'?'verde':'terra'}">${l.fonte === 'orc' ? 'Plataforma' : 'Legado'}${l.ano ? ' ' + l.ano : ''}</span></td>
+    <td><b>${esc(l.cliente) || '—'}</b></td>
+    <td>${esc(l.localidade) || '—'}</td>
+    <td class="num">${fmtEur(l.valor)}</td>
+    <td>${esc(l.periodicidade) || '—'}</td>
+    <td style="white-space:nowrap">${fmtData(l.data_envio)}</td>
+    <td><span class="chip ${chipEstado[l.estado] || 'cinza'}">${esc(l.estado)}</span></td>
+    <td>${esc(l.resp) || '—'}</td>
+    <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.notas)}">${esc(l.notas) || '—'}</td>
+    <td onclick="event.stopPropagation()">${l.fonte === 'orc' ? `<button class="acao" title="Abrir na ferramenta" onclick="abrirFerramenta('${l.id}')">🧮</button>` : ''}</td>
+  </tr>`).join('');
+}
+function abrirHistEdit(fonte, id) {
+  let r;
+  if (fonte === 'orc') { const o = orcamentos.find(x => x.id === id); if (!o) return;
+    r = { cliente: o.cliente, localidade: '', valor: o.valor_mensal, periodicidade: o.periodicidade, estado: o.estado, data_envio: o.data_envio, data_inicio: o.data_inicio, resp: o.responsavel, notas: o.notas };
+  } else { const h = historico.find(x => String(x.id) === String(id)); if (!h) return;
+    r = { cliente: h.cliente, localidade: h.localidade, valor: h.valor_mensal, periodicidade: h.periodicidade,
+      estado: h.adjudicado === 'Sim' ? 'Adjudicada' : (h.adjudicado === 'Não' ? 'Perdida' : 'Enviada'),
+      data_envio: h.data_envio, data_inicio: h.data_inicio, resp: h.responsavel, notas: h.notas };
+  }
+  editandoHist = { fonte, id };
+  document.getElementById('mhTitulo').textContent = (fonte === 'orc' ? 'Orçamento ' : 'Registo ') + id;
+  document.getElementById('mhCliente').value = r.cliente || '';
+  document.getElementById('mhLocalidade').value = r.localidade || '';
+  document.getElementById('mhValor').value = r.valor ?? '';
+  document.getElementById('mhPeriodicidade').value = r.periodicidade || '';
+  document.getElementById('mhEstado').value = r.estado || 'Enviada';
+  document.getElementById('mhDataEnvio').value = r.data_envio || '';
+  document.getElementById('mhDataInicio').value = r.data_inicio || '';
+  document.getElementById('mhResp').value = r.resp || '';
+  document.getElementById('mhNotas').value = r.notas || '';
+  document.getElementById('modalHist').classList.add('aberto');
+}
+async function guardarHist() {
+  if (!editandoHist) return;
+  const v = id => document.getElementById(id).value;
+  const estado = v('mhEstado');
+  try {
+    if (editandoHist.fonte === 'orc') {
+      const patch = {
+        cliente: v('mhCliente').trim(), valor_mensal: v('mhValor') === '' ? null : +v('mhValor'),
+        periodicidade: v('mhPeriodicidade').trim(), estado,
+        data_envio: v('mhDataEnvio') || null, data_inicio: v('mhDataInicio') || null,
+        responsavel: v('mhResp').trim(), notas: v('mhNotas').trim(),
+        atualizado_em: new Date().toISOString()
+      };
+      await sbUpd('man_orcamentos', 'id=eq.' + encodeURIComponent(editandoHist.id), patch);
+      const o = orcamentos.find(x => x.id === editandoHist.id); if (o) Object.assign(o, patch);
+    } else {
+      const patch = {
+        cliente: v('mhCliente').trim(), localidade: v('mhLocalidade').trim(),
+        valor_mensal: v('mhValor') === '' ? null : +v('mhValor'),
+        periodicidade: v('mhPeriodicidade').trim(),
+        adjudicado: estado === 'Adjudicada' ? 'Sim' : (estado === 'Perdida' ? 'Não' : ''),
+        data_envio: v('mhDataEnvio') || null, data_inicio: v('mhDataInicio') || null,
+        responsavel: v('mhResp').trim(), notas: v('mhNotas').trim()
+      };
+      await sbUpd('man_historico', 'id=eq.' + editandoHist.id, patch);
+      const h = historico.find(x => String(x.id) === String(editandoHist.id));
+      if (h) Object.assign(h, patch);
+    }
+    fecharModal('modalHist');
+    toast('Gravado ✓');
+    renderOrcamentos(); renderHistorico();
+  } catch (e) { toast('Erro: ' + e.message); }
+}
+
+/* ==================== TRIAGEM (heartbeat) ==================== */
+async function estadoTriagem() {
+  try {
+    const rows = await sbGet('man_triagem_log', 'select=corrido_em,novos,erros&order=corrido_em.desc&limit=1');
+    const chip = document.getElementById('triagemChip');
+    const txt = document.getElementById('triagemTxt');
+    if (!rows.length) { txt.textContent = 'triagem: ainda sem corridas'; return; }
+    const ult = new Date(rows[0].corrido_em);
+    const min = Math.round((Date.now() - ult.getTime()) / 60000);
+    const quando = min < 60 ? `há ${min} min` : `há ${Math.round(min / 60)} h`;
+    txt.textContent = 'triagem ' + quando;
+    chip.classList.toggle('erro', min > 60);
+    chip.classList.toggle('ok', min <= 60);
+  } catch (_) { /* silencioso */ }
+}
+
+/* ==================== ARRANQUE ==================== */
+async function init() {
+  try {
+    await Promise.all([carregarPedidos(), carregarOrcamentos()]);
+    await carregarHistorico();
+    estadoTriagem();
+    setInterval(estadoTriagem, 5 * 60 * 1000);
+  } catch (e) {
+    toast('Erro a carregar dados: ' + e.message);
+    console.error(e);
+  }
+}
+init();
+</script>
+</body>
+</html>
