@@ -797,7 +797,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-06j'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-08a'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -1625,7 +1625,14 @@ async function emPreparar(p, msg){
     const ja = await (await fetch(FN_EMAIL + '?acao=anexos&id=' + encodeURIComponent(msg.id), { headers: { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key } })).json();
     if (!ja.ok) throw new Error(ja.message || 'não consegui listar os anexos.');
 
-    EM = { pid: p.id, msg, driveId, pastaId: base.id, emailsId: emails.id, subpastas, anexos: ja.anexos || [] };
+    // detetar links para ficheiros no corpo (WeTransfer, Dropbox, Drive, OneDrive, diretos)
+    let links = [];
+    try {
+      const jl = await (await fetch(FN_EMAIL + '?acao=links&id=' + encodeURIComponent(msg.id), { headers: { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key } })).json();
+      if (jl.ok) links = jl.links || [];
+    } catch (_) { /* sem links, segue */ }
+
+    EM = { pid: p.id, msg, driveId, pastaId: base.id, emailsId: emails.id, subpastas, anexos: ja.anexos || [], links };
     emRenderTriagem();
   } catch (e) { emErro(e.message); }
 }
@@ -1659,6 +1666,30 @@ function emRenderTriagem(){
       '</div>';
     }).join('');
   }
+
+  // links para ficheiros detetados no corpo — descarregados pelo backend e carregados
+  // para a subpasta escolhida; o utilizador decide o destino de cada um (ou exclui)
+  if (EM.links && EM.links.length) {
+    const NOMES_SERVICO = { dropbox:'Dropbox', gdrive:'Google Drive', onedrive:'OneDrive/SharePoint', direto:'link direto', wetransfer:'WeTransfer' };
+    html += '<div class="am-sec">Links para ficheiros detetados no email</div>';
+    html += EM.links.map((l, i) => {
+      const suportado = l.servico !== 'wetransfer';
+      const nome = l.nome || ('Ficheiro via ' + (NOMES_SERVICO[l.servico] || l.servico));
+      // sem nome conhecido, links de obra costumam ser desenhos/projetos → Peças Desenhadas
+      const padrao = l.nome ? padraoDe(l.nome) : (pecas ? pecas.id : padraoFich);
+      return '<div class="em-anexo">' +
+        '<div class="em-anexo-info"><div class="em-anexo-nome">🔗 ' + esc(nome) + '</div>' +
+        '<div class="pm-meta">' + esc(NOMES_SERVICO[l.servico] || l.servico) +
+          (suportado ? '' : ' · <b>não suportado — descarregar manualmente</b>') +
+          ' · <a href="' + esc(l.url) + '" target="_blank" rel="noopener">abrir link</a></div></div>' +
+        '<select class="sel-mini em-link" data-l="' + i + '"' + (suportado ? '' : ' disabled') + '>' +
+          '<option value="__ignorar"' + (suportado ? '' : ' selected') + '>— não carregar —</option>' +
+          (suportado ? emOpcoesSubpastaDefault(padrao) : '') +
+        '</select>' +
+      '</div>';
+    }).join('');
+  }
+
   $('emCorpo').innerHTML = html;
   $('emAcoes').innerHTML = '<button class="btn ghost" onclick="emFechar()">Cancelar</button>' +
     '<button class="btn primario" onclick="emExecutar()">Arquivar na pasta</button>';
@@ -1671,10 +1702,11 @@ function emOpcoesSubpastaDefault(selId){
 async function emExecutar(){
   // ler escolhas antes de mexer no DOM
   const escolhas = [...document.querySelectorAll('.em-dest')].map(sel => ({ i: +sel.dataset.i, dest: sel.value }));
+  const escolhasLinks = [...document.querySelectorAll('.em-link')].map(sel => ({ i: +sel.dataset.l, dest: sel.value }));
   $('emCorpo').innerHTML = '<div style="padding:18px;color:var(--cinza)">A arquivar… não feches a janela.</div>';
   $('emAcoes').innerHTML = '';
   const headersEmail = { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key };
-  let okEml = false, nAnexos = 0, erros = [];
+  let okEml = false, nAnexos = 0, nLinks = 0, erros = [];
 
   // 1) .eml → Emails
   try {
@@ -1699,8 +1731,30 @@ async function emExecutar(){
     } catch (e) { erros.push(a.nome + ': ' + e.message); }
   }
 
+  // 3) links escolhidos — o backend descarrega (Dropbox/Drive/OneDrive/direto),
+  //    o upload é feito aqui com a sessão Microsoft do utilizador
+  for (const c of escolhasLinks) {
+    if (c.dest === '__ignorar') continue;
+    const l = EM.links[c.i];
+    if (!l) continue;
+    $('emCorpo').innerHTML = '<div style="padding:18px;color:var(--cinza)">A descarregar «' + esc(l.nome || l.servico) + '»… (pode demorar, depende do tamanho)</div>';
+    try {
+      const r = await fetch(FN_EMAIL + '?acao=fetchlink&url=' + encodeURIComponent(l.url), { headers: headersEmail });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'falha ao descarregar');
+      const nomeHdr = r.headers.get('X-Nome');
+      const buf = await r.arrayBuffer();
+      if (!buf.byteLength) throw new Error('o download veio vazio');
+      let nome = l.nome || 'ficheiro-do-link-' + (c.i + 1);
+      if (nomeHdr) { try { nome = decodeURIComponent(nomeHdr); } catch (_) { nome = nomeHdr; } }
+      await spUploadBytes(EM.driveId, c.dest, nome, buf);
+      nLinks++;
+    } catch (e) { erros.push('Link ' + (l.nome || l.servico) + ': ' + e.message); }
+  }
+
   const resumo = (okEml ? '✓ Email arquivado em Emails' : '✗ Email não arquivado') +
-    ' · ' + nAnexos + ' anexo(s) carregado(s)' + (erros.length ? '\n\nProblemas:\n• ' + erros.join('\n• ') : '');
+    ' · ' + nAnexos + ' anexo(s) carregado(s)' +
+    (escolhasLinks.some(c => c.dest !== '__ignorar') ? ' · ' + nLinks + ' ficheiro(s) de links descarregado(s)' : '') +
+    (erros.length ? '\n\nProblemas:\n• ' + erros.join('\n• ') : '');
   $('emCorpo').innerHTML = '<div style="padding:18px;font-size:13px;white-space:pre-wrap;line-height:1.5' + (erros.length ? ';color:#a33' : '') + '">' + esc(resumo) + '</div>';
   $('emAcoes').innerHTML = '<button class="btn primario" onclick="emFechar()">Fechar</button>';
   if (okEml && !erros.length) toast('✓ Arquivado na pasta do pedido');
