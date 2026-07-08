@@ -263,7 +263,9 @@ footer{max-width:1280px;margin:0 auto;padding:10px 28px 26px;color:var(--cinza);
       <label id="mpLblEstado">Estado
         <select id="mpEstado"></select>
       </label>
-      <label>Responsável<input type="text" id="mpResp"></label>
+      <label>Responsável
+        <select id="mpResp"><option value="">—</option></select>
+      </label>
       <label class="c2">Notas<textarea id="mpNotas" placeholder="O que foi dito na chamada, contexto…"></textarea></label>
     </div>
     <div class="rodape">
@@ -303,7 +305,7 @@ footer{max-width:1280px;margin:0 auto;padding:10px 28px 26px;color:var(--cinza);
 <footer><span>We Garden · Plataforma de Manutenção</span><span id="rodapeBuild"></span></footer>
 
 <script>
-const BUILD = '2026-07-08b'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-08c'; // ← actualizar em CADA publicação (data + letra)
 console.log('We Garden Manutenção · build ' + BUILD);
 document.getElementById('rodapeBuild').textContent = 'build ' + BUILD;
 
@@ -352,6 +354,7 @@ function toast(msg) {
 let pedidos = [];
 let orcamentos = [];
 let historico = [];      // man_historico (legado)
+let RESPONSAVEIS = {};   // nome → email (man_config.responsaveis)
 let pipVista = 'ativos';
 let kpiFiltroPip = '';
 let orcAtual = null;     // id do orçamento aberto na ferramenta
@@ -435,7 +438,9 @@ function renderPipeline() {
       <td onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">
         <select class="sel-mini" onchange="mudarEstadoPedido('${p.id}', this.value)">${opts}</select>
       </td>
-      <td>${esc(p.resp) || '—'}</td>
+      <td onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">
+        <select class="sel-mini" onchange="mudarRespPedido('${p.id}', this.value)">${optsResp(p.resp)}</select>
+      </td>
       <td style="white-space:nowrap" onclick="event.stopPropagation()">
         <button class="acao" title="Orçamentar" onclick="orcamentarPedido('${p.id}')">🧮</button>
         <button class="btn perigo" title="Apagar" onclick="apagarPedido('${p.id}')">✕</button>
@@ -445,6 +450,31 @@ function renderPipeline() {
 }
 function mudarVistaPip(v) { pipVista = v; kpiFiltroPip = ''; renderPipeline(); }
 function kpiPip(e) { kpiFiltroPip = (kpiFiltroPip === e) ? '' : e; document.getElementById('fEstado').value = ''; renderPipeline(); }
+function optsResp(atual) {
+  const nomes = Object.keys(RESPONSAVEIS);
+  let html = `<option value="">—</option>` + nomes.map(n => `<option ${n === atual ? 'selected' : ''}>${n}</option>`).join('');
+  // resp antigo que já não está no mapa (texto livre de versões anteriores)
+  if (atual && !nomes.includes(atual)) html += `<option selected>${esc(atual)}</option>`;
+  return html;
+}
+async function mudarRespPedido(id, resp) {
+  try {
+    await sbUpd('man_pedidos', 'id=eq.' + encodeURIComponent(id), { resp, atualizado_em: new Date().toISOString() });
+    const p = pedidos.find(x => x.id === id); if (p) p.resp = resp;
+    if (resp && RESPONSAVEIS[resp]) notificarResp(id, resp);
+  } catch (e) { toast('Erro: ' + e.message); }
+}
+async function notificarResp(pedidoId, resp) {
+  try {
+    const r = await fetch(SB_URL + '/functions/v1/man-notificar', {
+      method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pedido_id: pedidoId, resp })
+    });
+    const j = await r.json();
+    if (j.ok) toast(resp + ' notificado por email ✓ (' + j.notificado + ')');
+    else toast('Atribuído a ' + resp + ', mas o email falhou: ' + (j.error || '?'));
+  } catch (e) { toast('Atribuído a ' + resp + ', mas o email falhou: ' + e.message); }
+}
 async function mudarEstadoPedido(id, estado) {
   try { await sbUpd('man_pedidos', 'id=eq.' + encodeURIComponent(id), { estado, atualizado_em: new Date().toISOString() }); }
   catch (e) { toast('Erro: ' + e.message); }
@@ -477,14 +507,18 @@ function preencherSelEstados() {
   const s = document.getElementById('mpEstado');
   s.innerHTML = ESTADOS_PIP.map(e => `<option>${e}</option>`).join('');
 }
+function preencherSelResp(atual) {
+  document.getElementById('mpResp').innerHTML = optsResp(atual || '');
+}
 function abrirNovoPedido() {
   editandoPedido = null;
   document.getElementById('mpTitulo').textContent = 'Novo pedido';
-  ['mpNome','mpTelefone','mpEmail','mpLocalidade','mpMorada','mpArea','mpResp','mpNotas'].forEach(i => document.getElementById(i).value = '');
+  ['mpNome','mpTelefone','mpEmail','mpLocalidade','mpMorada','mpArea','mpNotas'].forEach(i => document.getElementById(i).value = '');
   document.getElementById('mpTipo').value = '';
   document.getElementById('mpPeriodicidade').value = '';
   document.getElementById('mpOrigem').value = 'telefone';
   preencherSelEstados();
+  preencherSelResp('');
   document.getElementById('mpEstado').value = 'Não iniciado';
   document.getElementById('modalPedido').classList.add('aberto');
   setTimeout(() => document.getElementById('mpNome').focus(), 50);
@@ -504,7 +538,7 @@ function abrirEditarPedido(id) {
   document.getElementById('mpOrigem').value = p.origem || 'telefone';
   preencherSelEstados();
   document.getElementById('mpEstado').value = p.estado || 'Não iniciado';
-  document.getElementById('mpResp').value = p.resp || '';
+  preencherSelResp(p.resp || '');
   document.getElementById('mpNotas').value = (p.notas || '') + (p.mensagem ? (p.notas ? '\n---\n' : '') + p.mensagem : '');
   document.getElementById('modalPedido').classList.add('aberto');
 }
@@ -525,16 +559,22 @@ async function guardarPedido() {
     atualizado_em: new Date().toISOString()
   };
   if (!row.nome && !row.telefone && !row.email) { toast('Preenche pelo menos o nome ou um contacto.'); return; }
+  const respAnterior = editandoPedido ? ((pedidos.find(x => x.id === editandoPedido) || {}).resp || '') : '';
   const btn = document.getElementById('mpGuardar'); btn.disabled = true;
   try {
+    let idGravado;
     if (editandoPedido) {
       // notas do modal incluem a mensagem original concatenada — não sobrescrever mensagem
       await sbUpd('man_pedidos', 'id=eq.' + encodeURIComponent(editandoPedido), row);
+      idGravado = editandoPedido;
       toast('Pedido ' + editandoPedido + ' atualizado.');
     } else {
       const novo = await sbIns('man_pedidos', row);
+      idGravado = novo.id;
       toast('Pedido ' + novo.id + ' criado.');
     }
+    // responsável novo ou mudou → notificar por email
+    if (row.resp && row.resp !== respAnterior && RESPONSAVEIS[row.resp]) notificarResp(idGravado, row.resp);
     fecharModal('modalPedido');
     await carregarPedidos();
   } catch (e) { toast('Erro ao gravar: ' + e.message); }
@@ -820,8 +860,15 @@ async function estadoTriagem() {
 }
 
 /* ==================== ARRANQUE ==================== */
+async function carregarResponsaveis() {
+  try {
+    const rows = await sbGet('man_config', 'select=valor&chave=eq.responsaveis');
+    if (rows.length) RESPONSAVEIS = JSON.parse(rows[0].valor);
+  } catch (e) { console.warn('responsaveis:', e); }
+}
 async function init() {
   try {
+    await carregarResponsaveis();
     await Promise.all([carregarPedidos(), carregarOrcamentos()]);
     await carregarHistorico();
     estadoTriagem();
