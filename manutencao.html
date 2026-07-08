@@ -303,7 +303,7 @@ footer{max-width:1280px;margin:0 auto;padding:10px 28px 26px;color:var(--cinza);
 <footer><span>We Garden · Plataforma de Manutenção</span><span id="rodapeBuild"></span></footer>
 
 <script>
-const BUILD = '2026-07-08a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-08b'; // ← actualizar em CADA publicação (data + letra)
 console.log('We Garden Manutenção · build ' + BUILD);
 document.getElementById('rodapeBuild').textContent = 'build ' + BUILD;
 
@@ -452,8 +452,23 @@ async function mudarEstadoPedido(id, estado) {
   renderPipeline();
 }
 async function apagarPedido(id) {
+  const p = pedidos.find(x => x.id === id);
   if (!confirm('Apagar o pedido ' + id + '? Esta ação não tem volta.')) return;
-  try { await sbDel('man_pedidos', 'id=eq.' + encodeURIComponent(id)); pedidos = pedidos.filter(p => p.id !== id); renderPipeline(); toast('Pedido apagado.'); }
+  try {
+    // pedidos vindos de email: registar exclusões para a triagem não os reimportar
+    if (p && p.origem === 'email' && p.origem_email_id) {
+      const excl = [{ tipo: 'email_id', valor: p.origem_email_id }];
+      if (p.email && confirm('Ignorar também FUTUROS emails de ' + p.email + '?\n\nOK = nunca mais importar deste remetente\nCancelar = só este email'))
+        excl.push({ tipo: 'remetente', valor: p.email });
+      await fetch(SB_URL + '/rest/v1/man_triagem_ignorar', {
+        method: 'POST',
+        headers: { ...H, 'Content-Type': 'application/json', Prefer: 'return=minimal,resolution=ignore-duplicates' },
+        body: JSON.stringify(excl)
+      });
+    }
+    await sbDel('man_pedidos', 'id=eq.' + encodeURIComponent(id));
+    pedidos = pedidos.filter(x => x.id !== id); renderPipeline(); toast('Pedido apagado.');
+  }
   catch (e) { toast('Erro: ' + e.message); }
 }
 
