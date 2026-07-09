@@ -401,12 +401,18 @@ th .si{opacity:.45;font-size:10px}
       <span id="pipTriagem" style="font-size:11.5px;color:var(--cinza)"></span>
       <span id="pipSessao" style="margin-left:auto;font-size:12px;color:var(--cinza)"></span>
     </div>
+    <div id="pipLoteBarra" style="display:none;align-items:center;gap:12px;background:var(--verde-suave);border:1px solid var(--verde-claro);border-radius:8px;padding:8px 12px;margin-bottom:10px">
+      <span id="pipLoteN" style="font-weight:600"></span>
+      <button class="btn perigo mini" onclick="apagarPedidosSelecionados()">🗑️ Apagar selecionados</button>
+      <button class="btn ghost mini" onclick="pipLimparSelecao()">Limpar seleção</button>
+    </div>
     <div class="tabela-wrap">
       <table>
         <thead><tr>
+          <th style="width:26px;text-align:center"><input type="checkbox" id="pipSelAll" onclick="pipToggleTodos(this.checked)" title="Selecionar todos os visíveis"></th>
           <th>Data</th><th>Código</th><th>Pedido</th><th>Remetente</th><th>Localização</th><th>Tipo</th><th>Estado</th><th>Resp.</th><th>Ligações</th><th></th>
         </tr></thead>
-        <tbody id="pipCorpo"><tr><td colspan="10" class="vazio">A carregar pedidos…</td></tr></tbody>
+        <tbody id="pipCorpo"><tr><td colspan="11" class="vazio">A carregar pedidos…</td></tr></tbody>
       </table>
     </div>
   </section>
@@ -796,7 +802,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-08g'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-08h'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -1052,7 +1058,7 @@ async function carregarPedidos(){
     estadoTriagem();
     reconciliarNoSharePoint();  // marca "No SharePoint" os que já têm pasta mas ainda estão "Não iniciado"
   } catch (e) {
-    $('pipCorpo').innerHTML = '<tr><td colspan="10" class="vazio">Não foi possível ler a pipeline — ' + esc(e.message) + '</td></tr>';
+    $('pipCorpo').innerHTML = '<tr><td colspan="11" class="vazio">Não foi possível ler a pipeline — ' + esc(e.message) + '</td></tr>';
   }
 }
 
@@ -1792,8 +1798,12 @@ function renderPipeline(){
     return norm([p.pedido, p.remetente, p.localizacao, codigoDaPasta(p.sharepoint_url), p.tipo]
       .concat(assoc.map(a => [a.pedido, a.remetente, a.localizacao].join(' '))).join(' ')).includes(q);
   });
+  // limpar da seleção os pedidos que já não estão na lista visível
+  const idsVisiveis = new Set(lista.map(p => String(p.id)));
+  pipSel.forEach(id => { if (!idsVisiveis.has(id)) pipSel.delete(id); });
   $('pipCorpo').innerHTML = lista.length ? lista.map(p =>
-    '<tr' + (p.estado === 'Fora de Zona' ? ' class="linha-fora-zona"' : '') + '>' +
+    '<tr' + (p.estado === 'Fora de Zona' ? ' class="linha-fora-zona"' : '') + (pipSel.has(String(p.id)) ? ' style="background:var(--verde-suave)"' : '') + '>' +
+    '<td style="text-align:center"><input type="checkbox" class="pip-sel" data-id="' + esc(String(p.id)) + '" onclick="pipToggleSel(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\', this.checked)"' + (pipSel.has(String(p.id)) ? ' checked' : '') + '></td>' +
     '<td>' + fmtData(p.data) + '</td>' +
     '<td>' + esc(codigoDaPasta(p.sharepoint_url) || '—') + '</td>' +
     '<td>' + esc(p.pedido || '—') +
@@ -1818,9 +1828,74 @@ function renderPipeline(){
     '</td>' +
     '<td><button class="btn ghost mini" onclick="orcamentarPedido(\'' + esc(p.id).replace(/'/g, "\\'") + '\')">Orçamentar →</button></td>' +
     '</tr>'
-  ).join('') : '<tr><td colspan="10" class="vazio">Nenhum pedido corresponde aos filtros.</td></tr>';
+  ).join('') : '<tr><td colspan="11" class="vazio">Nenhum pedido corresponde aos filtros.</td></tr>';
   actualizarSessaoPip();
   renderKpisPip();
+  pipActualizarLote();
+}
+
+/* ============================================================
+   Seleção múltipla na pipeline (apagar em lote)
+   ============================================================ */
+let pipSel = new Set();
+
+function pipToggleSel(id, on){
+  if (on) pipSel.add(String(id)); else pipSel.delete(String(id));
+  const tr = document.querySelector('.pip-sel[data-id="' + (window.CSS && CSS.escape ? CSS.escape(String(id)) : String(id)) + '"]');
+  if (tr) { const row = tr.closest('tr'); if (row) row.style.background = on ? 'var(--verde-suave)' : ''; }
+  pipActualizarLote();
+}
+
+function pipToggleTodos(on){
+  document.querySelectorAll('#pipCorpo .pip-sel').forEach(cb => {
+    cb.checked = on;
+    const id = String(cb.dataset.id);
+    if (on) pipSel.add(id); else pipSel.delete(id);
+    const row = cb.closest('tr'); if (row) row.style.background = on ? 'var(--verde-suave)' : '';
+  });
+  pipActualizarLote();
+}
+
+function pipLimparSelecao(){
+  pipSel.clear();
+  document.querySelectorAll('#pipCorpo .pip-sel').forEach(cb => { cb.checked = false; const row = cb.closest('tr'); if (row) row.style.background = ''; });
+  const all = $('pipSelAll'); if (all) { all.checked = false; all.indeterminate = false; }
+  pipActualizarLote();
+}
+
+function pipActualizarLote(){
+  const barra = $('pipLoteBarra');
+  const n = pipSel.size;
+  if (barra) barra.style.display = n ? 'flex' : 'none';
+  const lbl = $('pipLoteN'); if (lbl) lbl.textContent = n + ' pedido' + (n !== 1 ? 's' : '') + ' selecionado' + (n !== 1 ? 's' : '');
+  // estado do checkbox "todos" (marcado / indeterminado)
+  const visiveis = [...document.querySelectorAll('#pipCorpo .pip-sel')];
+  const marcados = visiveis.filter(cb => cb.checked).length;
+  const all = $('pipSelAll');
+  if (all) { all.checked = visiveis.length > 0 && marcados === visiveis.length; all.indeterminate = marcados > 0 && marcados < visiveis.length; }
+}
+
+async function apagarPedidosSelecionados(){
+  const ids = [...pipSel];
+  if (!ids.length) return;
+  const alvo = pedidos.filter(p => ids.includes(String(p.id)));
+  const temAssociados = alvo.some(p => pedidos.some(x => String(x.associado_a) === String(p.id)));
+  const aviso = 'Apagar ' + ids.length + ' pedido' + (ids.length !== 1 ? 's' : '') + ' da pipeline?\n\n'
+    + alvo.slice(0, 12).map(p => '• ' + (codigoDaPasta(p.sharepoint_url) ? codigoDaPasta(p.sharepoint_url) + ' — ' : '') + (p.pedido || '(sem descrição)')).join('\n')
+    + (alvo.length > 12 ? '\n• …e mais ' + (alvo.length - 12) : '')
+    + '\n\nEsta acção é irreversível. As pastas no SharePoint NÃO são apagadas.'
+    + (temAssociados ? '\n\nNota: emails associados a estes pedidos voltam a aparecer como pedidos próprios.' : '');
+  if (!confirm(aviso)) return;
+  try {
+    // apagar num só pedido REST com id=in.(...)
+    const lista = ids.map(id => '"' + String(id).replace(/"/g, '\\"') + '"').join(',');
+    await db(PIPELINE, 'pedidos?id=in.(' + encodeURIComponent(lista) + ')', { method:'DELETE', headers:{ 'Prefer':'return=minimal' } });
+    const apagados = new Set(ids.map(String));
+    pedidos = pedidos.filter(x => !apagados.has(String(x.id)));
+    pipSel.clear();
+    toast(ids.length + ' pedido' + (ids.length !== 1 ? 's' : '') + ' apagado' + (ids.length !== 1 ? 's' : '') + ' da pipeline');
+    renderPipeline();
+  } catch (e) { toast('Erro ao apagar em lote: ' + e.message, 'erro'); }
 }
 
 /* ============================================================
