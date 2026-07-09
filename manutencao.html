@@ -32,6 +32,9 @@ nav{display:flex;gap:4px;flex:1}
 .tab{background:none;border:none;cursor:pointer;font-size:14px;color:var(--cinza);padding:20px 16px 17px;border-bottom:3px solid transparent;transition:color .15s,border-color .15s}
 .tab:hover{color:var(--tinta)}
 .tab.ativa{color:var(--verde);border-bottom-color:var(--verde);font-weight:700}
+.tab-badge{display:inline-block;min-width:18px;padding:1px 6px;border-radius:99px;background:var(--erro);color:#fff;font-size:11px;font-weight:700;vertical-align:middle}
+tr.sup-nao td{font-weight:600}
+tr.sup-corpo td{background:#FAF9F4;font-weight:400;white-space:pre-wrap;color:var(--cinza);font-size:13px;padding:12px 16px}
 #triagemChip{font-size:12px;color:var(--cinza);display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--linha);border-radius:99px;background:var(--cal);white-space:nowrap}
 #triagemChip .ponto{width:8px;height:8px;border-radius:50%;background:#C9C5BA;flex:none}
 #triagemChip.ok .ponto{background:var(--verde-claro)}
@@ -125,6 +128,7 @@ footer{max-width:1280px;margin:0 auto;padding:10px 28px 26px;color:var(--cinza);
     <button class="tab ativa" data-tab="pipeline" onclick="mudarTab('pipeline')">Pipeline</button>
     <button class="tab" data-tab="orcamentacao" onclick="mudarTab('orcamentacao')">Orçamentação</button>
     <button class="tab" data-tab="historico" onclick="mudarTab('historico')">Histórico</button>
+    <button class="tab" data-tab="suporte" onclick="mudarTab('suporte')">Suporte <span id="badgeSuporte" class="tab-badge" style="display:none"></span></button>
   </nav>
   <div id="triagemChip"><span class="ponto"></span><span id="triagemTxt">triagem —</span></div>
 </header>
@@ -221,6 +225,32 @@ footer{max-width:1280px;margin:0 auto;padding:10px 28px 26px;color:var(--cinza);
   </div>
 </section>
 
+<!-- ==================== SUPORTE ==================== -->
+<section class="painel" id="painel-suporte">
+  <div class="painel-topo">
+    <div>
+      <h2>Suporte a clientes</h2>
+      <p>Emails de clientes atuais sobre jardins existentes (jardins@). Não são pedidos de orçamento novos.</p>
+    </div>
+  </div>
+  <div class="filtros">
+    <input type="text" id="sPesq" placeholder="Pesquisar remetente, assunto…" oninput="renderSuporte()">
+    <select id="sFiltro" onchange="renderSuporte()">
+      <option value="">Todos</option>
+      <option value="nao">Por ler</option>
+      <option value="lido">Lidos</option>
+    </select>
+  </div>
+  <div class="tabela-wrap">
+    <table>
+      <thead><tr>
+        <th></th><th>De</th><th>Assunto</th><th>Recebido</th><th></th>
+      </tr></thead>
+      <tbody id="corpoSuporte"></tbody>
+    </table>
+  </div>
+</section>
+
 </main>
 
 <!-- ==================== MODAL PEDIDO ==================== -->
@@ -305,7 +335,7 @@ footer{max-width:1280px;margin:0 auto;padding:10px 28px 26px;color:var(--cinza);
 <footer><span>We Garden · Plataforma de Manutenção</span><span id="rodapeBuild"></span></footer>
 
 <script>
-const BUILD = '2026-07-08c'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-08d'; // ← actualizar em CADA publicação (data + letra)
 console.log('We Garden Manutenção · build ' + BUILD);
 document.getElementById('rodapeBuild').textContent = 'build ' + BUILD;
 
@@ -342,6 +372,7 @@ async function sbDel(tabela, filtro) {
 const fmtEur = v => (v == null || v === '' || isNaN(v)) ? '—'
   : Number(v).toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' });
 const fmtData = d => { if (!d) return '—'; const x = new Date(d); return isNaN(x) ? '—' : x.toLocaleDateString('pt-PT'); };
+const fmtDataHora = d => { if (!d) return '—'; const x = new Date(d); return isNaN(x) ? '—' : x.toLocaleDateString('pt-PT') + ' ' + x.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }); };
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let _toastT = null;
 function toast(msg) {
@@ -354,6 +385,8 @@ function toast(msg) {
 let pedidos = [];
 let orcamentos = [];
 let historico = [];      // man_historico (legado)
+let suporte = [];        // man_suporte (emails de clientes atuais)
+let supExpandido = null; // id da mensagem de suporte expandida
 let RESPONSAVEIS = {};   // nome → email (man_config.responsaveis)
 let pipVista = 'ativos';
 let kpiFiltroPip = '';
@@ -859,6 +892,68 @@ async function estadoTriagem() {
   } catch (_) { /* silencioso */ }
 }
 
+/* ==================== SUPORTE ==================== */
+async function carregarSuporte() {
+  suporte = await sbGet('man_suporte', 'select=*&order=recebido_em.desc.nullslast');
+  renderSuporte();
+}
+function renderSuporte() {
+  const naoLidos = suporte.filter(s => !s.lido).length;
+  const badge = document.getElementById('badgeSuporte');
+  if (naoLidos > 0) { badge.textContent = naoLidos; badge.style.display = ''; }
+  else badge.style.display = 'none';
+
+  const fp = document.getElementById('sPesq').value.trim().toLowerCase();
+  const ff = document.getElementById('sFiltro').value;
+  let lista = suporte;
+  if (ff === 'nao') lista = lista.filter(s => !s.lido);
+  if (ff === 'lido') lista = lista.filter(s => s.lido);
+  if (fp) lista = lista.filter(s => [s.de_nome, s.de_email, s.assunto, s.corpo].some(v => v && String(v).toLowerCase().includes(fp)));
+
+  const tb = document.getElementById('corpoSuporte');
+  if (!lista.length) {
+    tb.innerHTML = `<tr><td colspan="5" class="vazio">Sem mensagens de suporte.${suporte.length ? '' : ' A ingestão do jardins@ liga-se quando definires a caixa de origem (man_config.suporte_mailbox).'}</td></tr>`;
+    return;
+  }
+  let html = '';
+  for (const s of lista) {
+    const cls = s.lido ? '' : 'sup-nao';
+    html += `<tr class="clicavel ${cls}" onclick="expandirSuporte('${s.id}')">
+      <td>${s.lido ? '' : '<span style="color:var(--erro)">●</span>'}</td>
+      <td><b>${esc(s.de_nome) || esc(s.de_email) || '—'}</b>${s.de_nome && s.de_email ? `<br><span style="font-size:12px;color:var(--cinza)">${esc(s.de_email)}</span>` : ''}</td>
+      <td>${esc(s.assunto) || '—'}</td>
+      <td style="white-space:nowrap">${fmtDataHora(s.recebido_em)}</td>
+      <td style="white-space:nowrap" onclick="event.stopPropagation()">
+        <button class="acao" title="${s.lido ? 'Marcar por ler' : 'Marcar lido'}" onclick="marcarSuporte('${s.id}', ${!s.lido})">${s.lido ? '↩' : '✓'}</button>
+        ${s.de_email ? `<a class="acao" title="Responder" href="mailto:${esc(s.de_email)}?subject=${encodeURIComponent('Re: ' + (s.assunto || ''))}" onclick="event.stopPropagation()" style="text-decoration:none">✉️</a>` : ''}
+        <button class="btn perigo" title="Apagar" onclick="apagarSuporte('${s.id}')">✕</button>
+      </td>
+    </tr>`;
+    if (String(supExpandido) === String(s.id))
+      html += `<tr class="sup-corpo"><td></td><td colspan="4">${esc(s.corpo) || '(sem corpo)'}</td></tr>`;
+  }
+  tb.innerHTML = html;
+}
+function expandirSuporte(id) {
+  supExpandido = (String(supExpandido) === String(id)) ? null : id;
+  const s = suporte.find(x => String(x.id) === String(id));
+  if (s && !s.lido && String(supExpandido) === String(id)) marcarSuporte(id, true, true);
+  else renderSuporte();
+}
+async function marcarSuporte(id, lido, silencioso) {
+  try {
+    await sbUpd('man_suporte', 'id=eq.' + id, { lido });
+    const s = suporte.find(x => String(x.id) === String(id)); if (s) s.lido = lido;
+    renderSuporte();
+    if (!silencioso) toast(lido ? 'Marcado como lido.' : 'Marcado por ler.');
+  } catch (e) { toast('Erro: ' + e.message); }
+}
+async function apagarSuporte(id) {
+  if (!confirm('Apagar esta mensagem de suporte?')) return;
+  try { await sbDel('man_suporte', 'id=eq.' + id); suporte = suporte.filter(x => String(x.id) !== String(id)); renderSuporte(); toast('Mensagem apagada.'); }
+  catch (e) { toast('Erro: ' + e.message); }
+}
+
 /* ==================== ARRANQUE ==================== */
 async function carregarResponsaveis() {
   try {
@@ -871,6 +966,7 @@ async function init() {
     await carregarResponsaveis();
     await Promise.all([carregarPedidos(), carregarOrcamentos()]);
     await carregarHistorico();
+    carregarSuporte();
     estadoTriagem();
     setInterval(estadoTriagem, 5 * 60 * 1000);
   } catch (e) {
