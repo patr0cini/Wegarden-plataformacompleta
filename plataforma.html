@@ -802,7 +802,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-08h'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-09a'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -1049,7 +1049,7 @@ $('resultadosPrecos').addEventListener('click', e => {
    ============================================================ */
 async function carregarPedidos(){
   try {
-    pedidos = await db(PIPELINE, 'pedidos?select=id,ano,pedido,tipo,remetente,email,data,localizacao,estado,resp,codigo,sharepoint_url,associado_a&order=data.desc.nullslast') || [];
+    pedidos = await db(PIPELINE, 'pedidos?select=id,ano,pedido,tipo,remetente,email,data,localizacao,estado,resp,codigo,sharepoint_url,associado_a,origem_email_id&order=data.desc.nullslast') || [];
     pipEstados = [...new Set(pedidos.map(p => p.estado).filter(Boolean))].sort();
     if (!pipEstados.includes('No SharePoint')) pipEstados.push('No SharePoint');
     pipResps = [...new Set(pedidos.map(p => (p.resp || '').trim()).filter(Boolean))].sort();
@@ -1167,20 +1167,38 @@ async function mudarRespPedido(id, valor){
 }
 
 /* Apaga um pedido da pipeline. Destrutivo e irreversível — pede confirmação. */
+/* Regista um email_id/remetente para a triagem não o reimportar (upsert silencioso) */
+async function registarIgnorar(tipo, valor, motivo){
+  if (!valor) return;
+  try {
+    await db(PIPELINE, 'triagem_ignorar?on_conflict=tipo,valor', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=ignore-duplicates,return=minimal' },
+      body: JSON.stringify([{ tipo, valor: String(valor), motivo: motivo || null }])
+    });
+  } catch (e) { console.warn('triagem_ignorar:', e.message); }
+}
+
 async function apagarPedido(id){
   const p = pedidos.find(x => String(x.id) === String(id));
   if (!p) return;
   const nome = p.pedido || '(sem descrição)';
+  const veioDeEmail = !!p.origem_email_id;
   const aviso = 'Apagar este pedido da pipeline?\n\n'
     + '• ' + (codigoDaPasta(p.sharepoint_url) ? codigoDaPasta(p.sharepoint_url) + ' — ' : '') + nome + '\n'
     + (p.remetente ? '• ' + p.remetente + '\n' : '')
     + (p.localizacao && p.localizacao !== '—' ? '• ' + p.localizacao + '\n' : '')
     + '\nEsta acção é irreversível.'
     + (p.sharepoint_url ? '\n\nNota: a pasta no SharePoint NÃO é apagada — só o registo na pipeline.' : '')
+    + (veioDeEmail ? '\n\nO email deixará de ser reimportado pela triagem.' : '')
     + (pedidos.some(x => String(x.associado_a) === String(id)) ? '\n\nNota: os emails associados a este pedido voltam a aparecer como pedidos próprios.' : '');
   if (!confirm(aviso)) return;
   try {
     await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(id), { method:'DELETE', headers:{ 'Prefer':'return=minimal' } });
+    if (p.origem_email_id) await registarIgnorar('email_id', p.origem_email_id, 'apagado: ' + nome);
+    // ruído recorrente do mesmo endereço (respostas/threads têm id diferente) → oferecer bloqueio do remetente
+    if (veioDeEmail && p.email && confirm('Bloquear TODOS os futuros emails de «' + p.email + '»?\n\nOK = nunca mais entram na pipeline (útil para remetentes repetidos)\nCancelar = só este email fica bloqueado.'))
+      await registarIgnorar('remetente', p.email.toLowerCase(), 'bloqueado ao apagar ' + nome);
     pedidos = pedidos.filter(x => String(x.id) !== String(id));
     toast('Pedido apagado da pipeline');
     renderPipeline();
@@ -1880,16 +1898,25 @@ async function apagarPedidosSelecionados(){
   if (!ids.length) return;
   const alvo = pedidos.filter(p => ids.includes(String(p.id)));
   const temAssociados = alvo.some(p => pedidos.some(x => String(x.associado_a) === String(p.id)));
+  const nEmail = alvo.filter(p => p.origem_email_id).length;
   const aviso = 'Apagar ' + ids.length + ' pedido' + (ids.length !== 1 ? 's' : '') + ' da pipeline?\n\n'
     + alvo.slice(0, 12).map(p => '• ' + (codigoDaPasta(p.sharepoint_url) ? codigoDaPasta(p.sharepoint_url) + ' — ' : '') + (p.pedido || '(sem descrição)')).join('\n')
     + (alvo.length > 12 ? '\n• …e mais ' + (alvo.length - 12) : '')
     + '\n\nEsta acção é irreversível. As pastas no SharePoint NÃO são apagadas.'
+    + (nEmail ? '\n\n' + nEmail + ' vieram de email e deixarão de ser reimportados pela triagem.' : '')
     + (temAssociados ? '\n\nNota: emails associados a estes pedidos voltam a aparecer como pedidos próprios.' : '');
   if (!confirm(aviso)) return;
   try {
     // apagar num só pedido REST com id=in.(...)
     const lista = ids.map(id => '"' + String(id).replace(/"/g, '\\"') + '"').join(',');
     await db(PIPELINE, 'pedidos?id=in.(' + encodeURIComponent(lista) + ')', { method:'DELETE', headers:{ 'Prefer':'return=minimal' } });
+    // registar os email_id dos apagados para a triagem não os reimportar
+    const comEmail = alvo.filter(p => p.origem_email_id);
+    if (comEmail.length)
+      await db(PIPELINE, 'triagem_ignorar?on_conflict=tipo,valor', {
+        method: 'POST', headers: { 'Prefer': 'resolution=ignore-duplicates,return=minimal' },
+        body: JSON.stringify(comEmail.map(p => ({ tipo: 'email_id', valor: String(p.origem_email_id), motivo: 'apagado em lote' })))
+      });
     const apagados = new Set(ids.map(String));
     pedidos = pedidos.filter(x => !apagados.has(String(x.id)));
     pipSel.clear();
