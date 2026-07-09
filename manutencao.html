@@ -335,7 +335,7 @@ footer{max-width:1280px;margin:0 auto;padding:10px 28px 26px;color:var(--cinza);
 <footer><span>We Garden · Plataforma de Manutenção</span><span id="rodapeBuild"></span></footer>
 
 <script>
-const BUILD = '2026-07-08d'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-09a'; // ← actualizar em CADA publicação (data + letra)
 console.log('We Garden Manutenção · build ' + BUILD);
 document.getElementById('rodapeBuild').textContent = 'build ' + BUILD;
 
@@ -398,6 +398,17 @@ let editandoHist = null; // {fonte:'orc'|'hist', id}
 const ESTADOS_PIP = ['Não iniciado','Em contacto','Visita marcada','Em orçamentação','Orçamentado','Para rever','Fora de Zona','Arquivado'];
 const CHIP_ESTADO = {'Não iniciado':'cinza','Em contacto':'azul','Visita marcada':'ambar','Em orçamentação':'terra','Orçamentado':'verde','Para rever':'ambar','Fora de Zona':'erro','Arquivado':'cinza'};
 const ORIGEM_ICO = { telefone: '📞', email: '✉️', site: '🌐' };
+function celulaOrigem(p) {
+  const ico = ORIGEM_ICO[p.origem] || '';
+  if (p.origem === 'email') {
+    const cx = esc(p.mailbox || 'email');
+    const abrir = p.email_weblink
+      ? ` <a href="${esc(p.email_weblink)}" target="_blank" rel="noopener" title="Abrir email no Outlook" style="text-decoration:none">↗</a>`
+      : '';
+    return `<span title="Recebido em ${cx}">${ico} ${cx}</span>${abrir}`;
+  }
+  return `<span>${ico} ${esc(p.origem)}</span>`;
+}
 const PER_LABEL = { diario:'Diário', '3x':'3×/sem', '2x':'2×/sem', '1e5x':'1,5 dia/sem', semanal:'Semanal', quinzenal:'Quinzenal', mensal:'Mensal' };
 
 window.addEventListener('beforeunload', e => { if (sujo) { e.preventDefault(); e.returnValue = ''; } });
@@ -467,7 +478,7 @@ function renderPipeline() {
       <td>${esc(p.localidade) || '—'}${p.fora_zona ? ' ⚠' : ''}</td>
       <td>${esc(p.tipo_espaco) || '—'}</td>
       <td>${PER_LABEL[p.periodicidade] || '—'}</td>
-      <td title="${esc(p.mailbox || p.origem)}">${ORIGEM_ICO[p.origem] || ''} ${esc(p.origem)}</td>
+      <td onclick="event.stopPropagation()">${celulaOrigem(p)}</td>
       <td onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">
         <select class="sel-mini" onchange="mudarEstadoPedido('${p.id}', this.value)">${opts}</select>
       </td>
