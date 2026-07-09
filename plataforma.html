@@ -797,7 +797,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-08e'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-08f'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -3440,6 +3440,7 @@ function normalizarAntigo(fonte, rec){
     progresso: rec.progresso || '',
     dataTxt: rec.dataEnvio ? fmtMes(rec.dataEnvio) : (rec.mes ? rec.mes : '—'),
     sortKey: rec.dataEnvio || rec.addedAt || (fonte + '-01-01'),
+    sortTs: Date.parse(rec.dataEnvio || rec.addedAt || (fonte + '-06-01')) || 0,
     estado, followups,
     grauData: { valor: Number(rec.valor) || 0, concurso: rec.concurso, dataArranque: rec.dataArranque, override: rec.grauOverride || '' },
     antigo: true,
@@ -3482,6 +3483,7 @@ function renderHistorico(){
       progresso: o.progresso || '',
       dataTxt: o.data_envio ? fmtMes(o.data_envio) : 'Em desenvolvimento',
       sortKey: o.data_envio || o.atualizado_em || '',
+      sortTs: Date.parse(o.data_envio || o.atualizado_em) || 0,
       estado:o.estado,
       followups: (Array.isArray(o.followups) ? o.followups : [])
         .concat(lembretesParaFollowups(o.lembretes)),
@@ -3513,7 +3515,8 @@ function renderHistorico(){
       concurso: '', visita: '', arranque: '',
       progresso: 'No SharePoint',
       dataTxt: 'Orçamento em Desenvolvimento',
-      sortKey: pp.modificado || pp.criado || '9999',  // ordenar para o topo por defeito (desc)
+      sortKey: pp.modificado || pp.criado || '9999',
+      sortTs: Date.parse(pp.modificado || pp.criado) || 0,  // ordena pela data real da pasta
       estado: 'No SharePoint',
       followups: [],
       grauData: { valor: 0, concurso: '', dataArranque: '', override: '' },
@@ -3544,8 +3547,12 @@ function renderHistorico(){
   lista.sort((a, b) => {
     let av, bv;
     if (col === '_grau') { av = grauDe(a).score; bv = grauDe(b).score; }
+    else if (col === 'sortKey') { av = a.sortTs || 0; bv = b.sortTs || 0; }  // data real (epoch), não string
     else { av = a[col]; bv = b[col]; }
-    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * asc;
+    if (typeof av === 'number' && typeof bv === 'number') {
+      if (av !== bv) return (av - bv) * asc;
+      return String(a.sortKey || '').localeCompare(String(b.sortKey || ''), 'pt') * asc;  // desempate estável
+    }
     return String(av || '').localeCompare(String(bv || ''), 'pt') * asc;
   });
 
