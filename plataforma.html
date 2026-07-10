@@ -802,7 +802,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-09a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-09b'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -3783,13 +3783,13 @@ async function abrirExcelHist(idx){
    «Adjudicado» / «Não Adjudicado» sincronizam o Estado
    (Adjudicado/Perdido na plataforma; Sim/Não no histórico antigo).
    ============================================================ */
-const PROGRESSO_OPCOES = ['No SharePoint', 'Iniciado', 'Verificar', 'Corrigir', 'Pendente Fornecedores', 'Enviar', 'Adjudicado', 'Não Adjudicado'];
+// «Enviar» = falta enviar (a fazer) · «Enviado» = já enviado, à espera de decisão
+const PROGRESSO_OPCOES = ['No SharePoint', 'Iniciado', 'Verificar', 'Corrigir', 'Pendente Fornecedores', 'Enviar', 'Enviado', 'Adjudicado', 'Não Adjudicado'];
 
 function selProgressoHist(idx, it){
   // pastas sem registo também são editáveis: a 1ª escolha cria o registo (histProgresso)
   // sem progresso gravado, derivar do estado para a coluna única fazer sentido:
-  // Adjudicado/Perdido mapeiam; Enviado/Rascunho/Em revisão aparecem como opção extra no topo
-  const mapa = { 'Adjudicado': 'Adjudicado', 'Perdido': 'Não Adjudicado', 'No SharePoint': 'No SharePoint' };
+  const mapa = { 'Adjudicado': 'Adjudicado', 'Perdido': 'Não Adjudicado', 'Enviado': 'Enviado', 'No SharePoint': 'No SharePoint' };
   const atual = it.progresso || mapa[it.estado] || it.estado || 'No SharePoint';
   const ops = PROGRESSO_OPCOES.includes(atual) ? PROGRESSO_OPCOES : [atual].concat(PROGRESSO_OPCOES);
   return '<select class="sel-mini" onchange="histProgresso(' + idx + ', this.value)" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">' +
@@ -3819,24 +3819,31 @@ async function histProgresso(idx, valor){
       return;
     }
     if (it.antigo) {
+      // no histórico antigo o estado deriva do campo adjudicado (Sim/Não/vazio→Enviado)
       const corpo = { progresso: valor };
       if (valor === 'Adjudicado') corpo.adjudicado = 'Sim';
-      if (valor === 'Não Adjudicado') corpo.adjudicado = 'Não';
+      else if (valor === 'Não Adjudicado') corpo.adjudicado = 'Não';
+      else if (valor === 'Enviado') corpo.adjudicado = '';  // enviado, sem decisão → estado deriva a «Enviado»
       await db(NOVO, 'historico?id=eq.' + encodeURIComponent(it.idOrig), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify(corpo) });
       it.progresso = valor;
-      if (corpo.adjudicado) { it.estado = corpo.adjudicado === 'Sim' ? 'Adjudicado' : 'Perdido'; if (it.raw) it.raw.adjudicado = corpo.adjudicado; }
+      if (corpo.adjudicado !== undefined) {
+        it.estado = corpo.adjudicado === 'Sim' ? 'Adjudicado' : (corpo.adjudicado === 'Não' ? 'Perdido' : 'Enviado');
+        if (it.raw) it.raw.adjudicado = corpo.adjudicado;
+      }
     } else {
+      const o = orcamentos.find(x => x.id === it.codigo);
       const corpo = { progresso: valor, atualizado_em: new Date().toISOString() };
       if (valor === 'Adjudicado') corpo.estado = 'Adjudicado';
-      if (valor === 'Não Adjudicado') corpo.estado = 'Perdido';
+      else if (valor === 'Não Adjudicado') corpo.estado = 'Perdido';
+      else if (valor === 'Enviado') { corpo.estado = 'Enviado'; if (!o || !o.data_envio) corpo.data_envio = new Date().toISOString(); }
       await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(it.codigo), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify(corpo) });
-      const o = orcamentos.find(x => x.id === it.codigo);
-      if (o) { o.progresso = valor; if (corpo.estado) o.estado = corpo.estado; }
+      if (o) { o.progresso = valor; if (corpo.estado) o.estado = corpo.estado; if (corpo.data_envio) o.data_envio = corpo.data_envio; }
       it.progresso = valor;
       if (corpo.estado) it.estado = corpo.estado;
     }
     toast(valor === 'Adjudicado' ? 'Progresso: Adjudicado — Estado passou a Adjudicado 🎉'
       : valor === 'Não Adjudicado' ? 'Progresso: Não Adjudicado — Estado passou a Perdido'
+      : valor === 'Enviado' ? 'Progresso: Enviado — marcado como enviado ✉️'
       : 'Progresso actualizado: ' + valor);
     renderHistorico();
   } catch (e) { toast('Erro ao gravar progresso: ' + e.message, 'erro'); renderHistorico(); }
