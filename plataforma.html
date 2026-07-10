@@ -526,13 +526,8 @@ th .si{opacity:.45;font-size:10px}
         <option value="">Todos os anos</option>
         <option>2026</option><option>2025</option><option>2024</option>
       </select>
-      <select id="histFonte" onchange="renderHistorico()">
-        <option value="">Todos os anos</option>
-        <option>2026</option><option>2025</option><option>2024</option>
-      </select>
       <select id="histEstado" onchange="renderHistorico()">
-        <option value="">Todos os estados</option>
-        <option>No SharePoint</option><option>Enviado</option><option>Adjudicado</option><option>Perdido</option>
+        <option value="">Todos os progressos</option>
       </select>
       <select id="histResp" onchange="renderHistorico()">
         <option value="">Todos os responsáveis</option>
@@ -557,8 +552,9 @@ th .si{opacity:.45;font-size:10px}
           <th class="ordenavel" onclick="histSort('cliente')">Requerente <span class="si">↕</span></th>
           <th class="ordenavel" onclick="histSort('responsavel')" style="text-align:center">Resp. <span class="si">↕</span></th>
           <th style="text-align:center">Nota</th>
+          <th></th>
         </tr></thead>
-        <tbody id="histCorpo"><tr><td colspan="12" class="vazio">A carregar…</td></tr></tbody>
+        <tbody id="histCorpo"><tr><td colspan="13" class="vazio">A carregar…</td></tr></tbody>
       </table>
     </div>
     <p style="font-size:12px;color:var(--cinza);margin-top:8px">Clica numa linha para ver e editar — as alterações às fontes 2024–2026 são gravadas nas plataformas existentes através das suas APIs.</p>
@@ -802,7 +798,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-09b'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-09c'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -3568,8 +3564,7 @@ function anoDoRegisto(it){
 function renderHistorico(){
   const q = norm($('histPesquisa').value);
   const fa = $('histAno').value;
-  const ff = $('histFonte').value;
-  const fe = $('histEstado').value;
+  const fe = $('histEstado').value;   // filtra pela coluna Progresso (valor efetivo)
   const fr = $('histResp').value;
   const fg = $('histGrau').value;
 
@@ -3633,10 +3628,13 @@ function renderHistorico(){
   const resps = [...new Set(tudoCompleto.map(t => t.responsavel).filter(Boolean))].sort((a,b) => a.localeCompare(b,'pt'));
   selR.innerHTML = '<option value="">Todos os responsáveis</option>' + resps.map(r => '<option' + (r === atualR ? ' selected' : '') + '>' + esc(r) + '</option>').join('');
 
+  // popular filtro de progresso a partir das opções (mesma lista da coluna)
+  const selE = $('histEstado');
+  selE.innerHTML = '<option value="">Todos os progressos</option>' + PROGRESSO_OPCOES.map(p => '<option' + (p === fe ? ' selected' : '') + '>' + esc(p) + '</option>').join('');
+
   // lista sem o filtro de ano — alimenta a divisão por anos do dashboard
   const listaSemAno = tudoCompleto.filter(it => {
-    if (ff && it.fonte !== ff) return false;
-    if (fe && it.estado !== fe) return false;
+    if (fe && progressoEfetivo(it) !== fe) return false;
     if (fr && it.responsavel !== fr) return false;
     if (fg && grauDe(it).label !== fg) return false;
     if (!q) return true;
@@ -3668,6 +3666,9 @@ function renderHistorico(){
     const iconeExcel = urlPasta
       ? ' <a href="#" onclick="event.stopPropagation(); abrirExcelHist(' + idx + '); return false" title="Abrir o Excel do orçamento (o mais recente da pasta)" style="text-decoration:none">📊</a>'
       : '';
+    const iconeEliminar = it.soSharePoint
+      ? '<span style="color:var(--cinza)" title="Só a pasta do SharePoint — nada para eliminar">—</span>'
+      : '<a href="#" onclick="event.stopPropagation(); apagarHist(' + idx + '); return false" title="Eliminar este orçamento do histórico" style="text-decoration:none">🗑️</a>';
     return '<tr class="clicavel-linha" onclick="abrirHistEdit(' + idx + ')" title="Clica para ver e editar">' +
       '<td><b>' + esc(it.codigo) + '</b>' + iconePasta + iconeExcel + '</td>' +
       '<td onclick="event.stopPropagation()" onmousedown="event.stopPropagation()" onpointerdown="event.stopPropagation()">' + selProgressoHist(idx, it) + '</td>' +
@@ -3681,8 +3682,9 @@ function renderHistorico(){
       '<td title="' + esc(it.cliente) + '">' + esc(it.cliente.length > 18 ? it.cliente.slice(0,17) + '…' : (it.cliente || '—')) + '</td>' +
       '<td style="text-align:center">' + (it.responsavel ? '<span class="resp-pill">' + esc(it.responsavel) + '</span>' : '<span style="color:var(--cinza)">—</span>') + '</td>' +
       '<td style="text-align:center">' + (nFu ? '<span class="b-nota">' + nFu + '</span>' : '<span style="color:var(--cinza);font-size:11px">—</span>') + '</td>' +
+      '<td style="text-align:center" onclick="event.stopPropagation()">' + iconeEliminar + '</td>' +
       '</tr>';
-  }).join('') : '<tr><td colspan="12" class="vazio">Nada encontrado com estes filtros.</td></tr>';
+  }).join('') : '<tr><td colspan="13" class="vazio">Nada encontrado com estes filtros.</td></tr>';
   fuAtualizarBadge();
   renderKpisHist(lista, listaSemAno, fa);
 }
@@ -3786,11 +3788,38 @@ async function abrirExcelHist(idx){
 // «Enviar» = falta enviar (a fazer) · «Enviado» = já enviado, à espera de decisão
 const PROGRESSO_OPCOES = ['No SharePoint', 'Iniciado', 'Verificar', 'Corrigir', 'Pendente Fornecedores', 'Enviar', 'Enviado', 'Adjudicado', 'Não Adjudicado'];
 
+/* Elimina um orçamento do histórico. 2026 → apaga de orcamentos_v2 (linhas caem por
+   cascade). Antigo → apaga de historico. Linhas «só pasta SharePoint» não têm registo. */
+async function apagarHist(idx){
+  const it = histLista[idx];
+  if (!it) return;
+  if (it.soSharePoint) { toast('Esta linha é só a pasta do SharePoint — não há orçamento na plataforma para eliminar.', 'erro'); return; }
+  const nome = (it.codigo || '(sem código)') + (it.obra ? ' — ' + it.obra : '');
+  if (!confirm('Eliminar este orçamento do histórico?\n\n' + nome + '\n\nEsta acção é irreversível.'
+    + (it.antigo ? '' : '\nAs linhas do orçamento também são apagadas.')
+    + (urlPastaDoHistorico(it) || it.webUrl ? '\n\nNota: a pasta no SharePoint NÃO é apagada.' : ''))) return;
+  try {
+    if (it.antigo) {
+      await db(NOVO, 'historico?id=eq.' + encodeURIComponent(it.idOrig), { method:'DELETE', headers:{ 'Prefer':'return=minimal' } });
+      historicoAntigo = historicoAntigo.filter(x => String(x.idOrig) !== String(it.idOrig));
+    } else {
+      await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(it.codigo), { method:'DELETE', headers:{ 'Prefer':'return=minimal' } });
+      orcamentos = orcamentos.filter(x => x.id !== it.codigo);
+    }
+    toast('Orçamento eliminado do histórico');
+    renderHistorico();
+  } catch (e) { toast('Erro ao eliminar: ' + e.message, 'erro'); }
+}
+
+// Valor efetivo do Progresso (o que a coluna mostra): usa o gravado; senão deriva do estado.
+function progressoEfetivo(it){
+  const mapa = { 'Adjudicado': 'Adjudicado', 'Perdido': 'Não Adjudicado', 'Enviado': 'Enviado', 'No SharePoint': 'No SharePoint' };
+  return it.progresso || mapa[it.estado] || it.estado || 'No SharePoint';
+}
+
 function selProgressoHist(idx, it){
   // pastas sem registo também são editáveis: a 1ª escolha cria o registo (histProgresso)
-  // sem progresso gravado, derivar do estado para a coluna única fazer sentido:
-  const mapa = { 'Adjudicado': 'Adjudicado', 'Perdido': 'Não Adjudicado', 'Enviado': 'Enviado', 'No SharePoint': 'No SharePoint' };
-  const atual = it.progresso || mapa[it.estado] || it.estado || 'No SharePoint';
+  const atual = progressoEfetivo(it);
   const ops = PROGRESSO_OPCOES.includes(atual) ? PROGRESSO_OPCOES : [atual].concat(PROGRESSO_OPCOES);
   return '<select class="sel-mini" onchange="histProgresso(' + idx + ', this.value)" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">' +
     ops.map(o => '<option' + (o === atual ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>';
