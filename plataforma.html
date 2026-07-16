@@ -798,7 +798,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-09c'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-09d'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -2370,7 +2370,27 @@ const STOP_PT = new Set(['fornecimento','execucao','instalacao','aplicacao','inc
   'na','no','nas','nos','e','a','o','as','os','que','se','ao','ate','como','mais',
   'num','numa','tipo','ser','deve','forma','cada','entre','apos','sua','seu']);
 
-function kwSP(s){ return norm(s).split(/\s+/).filter(w => w.length > 2 && !STOP_PT.has(w)); }
+/* Stemmer PT leve: unifica plurais/inflexões comuns (arvores→arvore, plantacoes→plantacao,
+   relvados→relvado, canais→canal) para o match não falhar por causa da forma da palavra. */
+function stemPT(w){
+  if (w.length < 4) return w;
+  w = w.replace(/oes$/, 'ao').replace(/aes$/, 'ao');                       // plural de -ão
+  w = w.replace(/ais$/, 'al').replace(/eis$/, 'el').replace(/ois$/, 'ol').replace(/uis$/, 'ul'); // -al/-el/-ol/-ul
+  if (w.length > 4) w = w.replace(/s$/, '');                               // plural simples
+  return w;
+}
+/* Tokeniza para o match: separa TAMBÉM por pontuação (antes só por espaços — 22% dos tokens
+   da tabela vinham com vírgulas/aspas/barras colados), mantém tokens com dígitos (dimensões:
+   25, 16mm, 3, 4…) e aplica stemming às palavras. */
+function kwSP(s){
+  const out = [];
+  for (const w of norm(s).replace(/[^a-z0-9]+/g, ' ').split(/\s+/)) {
+    if (!w) continue;
+    if (/\d/.test(w)) { if (w.length >= 2) out.push(w); }          // dimensões/medidas
+    else if (w.length > 2 && !STOP_PT.has(w)) out.push(stemPT(w));
+  }
+  return out;
+}
 
 let IDF = null, precosTok = null;
 function prepararIndice(){
@@ -2467,7 +2487,7 @@ function matchAutomatico(){
   });
   if (!fila.length) { toast('Todos os artigos já têm preço — nada a fazer.'); return; }
   fecharMatching();
-  AM = { fila, total: fila.length, pos: 0, aplicados: 0, saltados: 0, sem: 0, actual: null, limiar: 0.70 };
+  AM = { fila, total: fila.length, pos: 0, aplicados: 0, saltados: 0, sem: 0, actual: null, limiar: 0.60 };
   amAcoesNormais();
   $('amOverlay').classList.add('aberto');
   document.addEventListener('keydown', amTeclas);
