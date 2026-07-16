@@ -448,21 +448,6 @@ body{font-family:'DM Sans',sans-serif;background:#e8f0eb;display:flex;flex-direc
   cursor:pointer;transition:background .18s;margin-top:4px;letter-spacing:.04em
 }
 .print-btn:hover{background:#3d9c6a}
-.share-btn{
-  width:100%;height:44px;background:rgba(255,255,255,.1);border:1.5px solid rgba(255,255,255,.2);
-  border-radius:9px;color:#fff;font-family:'Syne',sans-serif;font-weight:600;font-size:13px;
-  cursor:pointer;transition:all .18s;letter-spacing:.04em;margin-top:6px;display:flex;
-  align-items:center;justify-content:center;gap:8px
-}
-.share-btn:hover{background:rgba(255,255,255,.18);border-color:rgba(255,255,255,.35)}
-.share-btn.copied{background:#2d7a52;border-color:#4caf7d}
-.share-toast{
-  position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
-  background:#1a4731;color:#fff;padding:10px 20px;border-radius:10px;
-  font-size:13px;font-family:'DM Sans',sans-serif;box-shadow:0 4px 20px rgba(0,0,0,.3);
-  z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none
-}
-.share-toast.show{opacity:1}
 
 /* ── PREVIEW ── */
 .preview{flex:1;overflow-y:auto;padding:16px;background:#dce8e1;display:flex;justify-content:center;align-items:flex-start}
@@ -832,9 +817,6 @@ html,body{height:100%;overflow:hidden}
     </div>
 
     <button class="print-btn" onclick="imprimirOrcamento()">🖨 Exportar / Imprimir PDF</button>
-    <button class="share-btn" id="share-btn" onclick="criarLinkPartilha()">
-      <span>🔗</span><span id="share-btn-text">Criar link de partilha</span>
-    </button>
 
   </div>
 </aside>
@@ -849,8 +831,6 @@ html,body{height:100%;overflow:hidden}
 
 <div class="toast" id="toast"></div>
 <button class="share-print-bar" onclick="imprimirOrcamento()">🖨 Imprimir / Guardar PDF</button>
-
-<div class="share-toast" id="share-toast">🔗 Link copiado para a área de transferência!</div>
 
 <script>
 /* ══ CALCULATOR JS ══ */
@@ -1559,73 +1539,6 @@ function imprimirOrcamento() {
     viewGen.style.display = orig.genDisplay;
   }, 1000);
 }
-/* ── SHARE LINK ── */
-function criarLinkPartilha() {
-  const params = new URLSearchParams();
-  params.set('v', 'p'); // open directly to proposal
-
-  // Language
-  params.set('l', lang);
-
-  // Generator fields
-  const nome = document.getElementById('clientName').value.trim();
-  if (nome) params.set('n', nome);
-  params.set('t', document.getElementById('clientType').value);
-
-  // Sections
-  const secs = [];
-  if (document.getElementById('s-arv').checked) secs.push('arv');
-  if (document.getElementById('s-arb').checked) secs.push('arb');
-  if (document.getElementById('s-rel').checked) secs.push('rel');
-  if (document.getElementById('s-mac').checked) secs.push('mac');
-  if (document.getElementById('s-reg').checked) secs.push('reg');
-  if (document.getElementById('s-lim').checked) secs.push('lim');
-  if (document.getElementById('s-cob').checked) secs.push('cob');
-  if (secs.length) params.set('s', secs.join(','));
-
-  params.set('tm', document.getElementById('teamSize').value || '2');
-  params.set('st', document.getElementById('show-team').checked ? '1' : '0');
-  params.set('per', document.getElementById('periodicity').value || 'quinzenal');
-  params.set('sp', document.getElementById('show-period').checked ? '1' : '0');
-  params.set('p', document.getElementById('price').value || '0');
-
-  const PROD_URL = 'https://wegarden.pt/wp-content/uploads/2026/05/wegarden-ferramentas.html';
-  const base = window.location.protocol === 'file:' ? PROD_URL : window.location.href.split('#')[0].split('?')[0];
-  const url = base + '#' + params.toString();
-
-  // Copy to clipboard
-  function copiarFallback() {
-    const ta = document.createElement('textarea');
-    ta.value = url;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand('copy'); mostrarToast(); }
-    catch(e) { prompt('Copia este link para partilhar com o cliente:', url); }
-    document.body.removeChild(ta);
-  }
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(url).then(() => mostrarToast()).catch(() => copiarFallback());
-  } else {
-    copiarFallback();
-  }
-}
-
-function mostrarToast() {
-  const btn = document.getElementById('share-btn');
-  const toast = document.getElementById('share-toast');
-  const btnText = document.getElementById('share-btn-text');
-  btnText.textContent = 'Link copiado!';
-  btn.classList.add('copied');
-  toast.classList.add('show');
-  setTimeout(() => {
-    toast.classList.remove('show');
-    btnText.textContent = 'Criar link de partilha';
-    btn.classList.remove('copied');
-  }, 3000);
-}
-
 function loadFromHash() {
   const hash = window.location.hash.slice(1);
   if (!hash) return;
