@@ -335,7 +335,7 @@ footer{max-width:1280px;margin:0 auto;padding:10px 28px 26px;color:var(--cinza);
 <footer><span>We Garden · Plataforma de Manutenção</span><span id="rodapeBuild"></span></footer>
 
 <script>
-const BUILD = '2026-07-09a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-10a'; // ← actualizar em CADA publicação (data + letra)
 console.log('We Garden Manutenção · build ' + BUILD);
 document.getElementById('rodapeBuild').textContent = 'build ' + BUILD;
 
@@ -734,7 +734,8 @@ window.addEventListener('message', async ev => {
         n: o.cliente || '', t: o.tipo_cliente || '', per: o.periodicidade || '',
         tm: o.pessoas || '', p: o.valor_mensal || '',
         s: (o.config && o.config.s) || (Array.isArray(o.seccoes) ? o.seccoes.join(',') : ''),
-        l: (o.config && o.config.l) || o.lingua || ''
+        l: (o.config && o.config.l) || o.lingua || '',
+        fotos: (o.config && o.config.fotos) || null
       };
       document.getElementById('orcFrame').contentWindow.postMessage({ tipo: 'wgman-config', config: cfg }, '*');
     }
