@@ -557,7 +557,7 @@ th .si{opacity:.45;font-size:10px}
         <tbody id="histCorpo"><tr><td colspan="13" class="vazio">A carregar…</td></tr></tbody>
       </table>
     </div>
-    <p style="font-size:12px;color:var(--cinza);margin-top:8px">Clica numa linha para ver e editar — as alterações às fontes 2024–2026 são gravadas nas plataformas existentes através das suas APIs.</p>
+    <p style="font-size:12px;color:var(--cinza);margin-top:8px">Clica numa linha para ver e editar — as alterações ficam gravadas na base de dados da plataforma.</p>
   </section>
 
 </main>
@@ -798,7 +798,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-09d'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-10a'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -2972,8 +2972,12 @@ function atualizarTotal(){
 /* ============================================================
    Guardar
    ============================================================ */
+/* Estado terminal → valor da coluna Progresso (sincronização Estado→Progresso) */
+const ESTADO_PARA_PROGRESSO = { 'Adjudicado': 'Adjudicado', 'Perdido': 'Não Adjudicado', 'Enviado': 'Enviado' };
+
 async function guardarOrcamento(silencioso){
   if (!atual) return;
+  const estadoAntes = atual.header.estado;
   lerCabecalho();
   const h = atual.header;
   if (!h.id) { if (!silencioso) toast('Indica o código do orçamento (ex.: ocWG26_120).', 'erro'); return; }
@@ -2990,6 +2994,10 @@ async function guardarOrcamento(silencioso){
     sp_ficheiro: (atual.spOrigem && atual.spFill) ? { origem: atual.spOrigem, fill: atual.spFill } : null,
     atualizado_em: new Date().toISOString()
   };
+  // o estado mudou para um terminal → alinhar a coluna Progresso (senão o progresso
+  // gravado antigo continuava a ganhar na tabela do histórico)
+  if (ESTADO_PARA_PROGRESSO[h.estado] && (atual.novo || h.estado !== estadoAntes))
+    corpo.progresso = ESTADO_PARA_PROGRESSO[h.estado];
   try {
     await db(NOVO, 'orcamentos_v2?on_conflict=id', {
       method: 'POST',
@@ -3426,11 +3434,6 @@ async function gerarExcelOriginal(){
 /* ============================================================
    Histórico
    ============================================================ */
-const FONTES_ANTIGAS = [
-  { fonte:'2026', url:'https://raw.githubusercontent.com/patr0cini/wegarden-orcamentos/main/data.json', embrulhado:true, api:'https://wegarden-api.onrender.com/data' },
-  { fonte:'2025', url:'https://raw.githubusercontent.com/patr0cini/wegarden-orcamentos-historico/main/data2025.json', api:'https://wegarden-orcamentos-historico.onrender.com/2025/data' },
-  { fonte:'2024', url:'https://raw.githubusercontent.com/patr0cini/wegarden-orcamentos-historico/main/data2024.json', api:'https://wegarden-orcamentos-historico.onrender.com/2024/data' }
-];
 let historicoAntigo = [];
 let pastasSharePoint = [];   // pastas de obra 2026 sem orçamento ainda (estado "No SharePoint")
 let histOrd = { col:'sortKey', asc:false };
@@ -3980,6 +3983,7 @@ async function histGuardar(){
         notas: '', notasHist: [], emailEnvio: '',
         dataEnvio: v('hDataEnvio'), grauOverride: v('hGrau')
       };
+      novo.progresso = novo.adjudicado === 'Sim' ? 'Adjudicado' : (novo.adjudicado === 'Não' ? 'Não Adjudicado' : '');
       if (novaNota) {
         const novaData = v('hNovaData');
         if (novaData) novo.lembretes = [{ data: novaData, texto: novaNota, done: false }];
@@ -4005,6 +4009,9 @@ async function histGuardar(){
         data_envio: v('hDataEnvio') || null,
         atualizado_em: new Date().toISOString()
       };
+      // estado mudou para terminal → alinhar Progresso
+      if (ESTADO_PARA_PROGRESSO[corpo.estado] && corpo.estado !== o.estado)
+        corpo.progresso = ESTADO_PARA_PROGRESSO[corpo.estado];
       if (novaNota) {
         const novaData = v('hNovaData');
         if (novaData) {
@@ -4036,6 +4043,9 @@ async function histGuardar(){
         dataArranque: v('hArranque').trim(),
         grauOverride: v('hGrau')
       };
+      // adjudicado mudou → alinhar Progresso (Sim→Adjudicado, Não→Não Adjudicado, vazio→Enviado)
+      if (mud.adjudicado !== (it.raw.adjudicado || ''))
+        mud.progresso = mud.adjudicado === 'Sim' ? 'Adjudicado' : (mud.adjudicado === 'Não' ? 'Não Adjudicado' : 'Enviado');
       if (novaNota) {
         const novaData = v('hNovaData');
         if (novaData) {
@@ -4072,6 +4082,7 @@ async function histGravarAntigo(f, idOrig, mud){
   if ('grauOverride' in mud) corpo.grau_override = mud.grauOverride;
   if ('notasHist' in mud) corpo.notas_hist = mud.notasHist;
   if ('lembretes' in mud) corpo.lembretes = mud.lembretes;
+  if ('progresso' in mud) corpo.progresso = mud.progresso;
   corpo.atualizado_em = new Date().toISOString();
 
   await db(NOVO, 'historico?id=eq.' + encodeURIComponent(idOrig), {
@@ -4086,6 +4097,7 @@ async function histGravarAntigo(f, idOrig, mud){
     concurso: row.concurso || '', visita: row.visita || '', adjudicado: row.adjudicado || '',
     dataArranque: row.data_arranque || '', emailEnvio: row.email_envio || '',
     dataEnvio: row.data_envio || '', grauOverride: row.grau_override || '',
+    progresso: row.progresso || '',
     notas: row.notas || '', notasHist: row.notas_hist || [], lembretes: row.lembretes || []
   };
 }
@@ -4109,6 +4121,7 @@ async function histCriarNovo2026(novo){
     grau_override: novo.grauOverride || '',
     notas: novo.notas || '',
     notas_hist: novo.notasHist || [],
+    progresso: novo.progresso || '',
     lembretes: novo.lembretes || []
   };
   const r = await db(NOVO, 'historico', {
@@ -4121,6 +4134,7 @@ async function histCriarNovo2026(novo){
     concurso: row.concurso || '', visita: row.visita || '', adjudicado: row.adjudicado || '',
     dataArranque: row.data_arranque || '', emailEnvio: row.email_envio || '',
     dataEnvio: row.data_envio || '', grauOverride: row.grau_override || '',
+    progresso: row.progresso || '',
     notas: row.notas || '', notasHist: row.notas_hist || [], lembretes: row.lembretes || []
   };
 }
