@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>We Garden · Plataforma Comercial</title>
+<title>We Garden · Plataforma Comercial de Construção</title>
 <style>
 :root{
   --verde:#1F4D2E;
@@ -67,6 +67,14 @@ header{
   letter-spacing:.14em;text-transform:uppercase;color:var(--cinza);
   border-left:1px solid var(--linha);padding-left:10px;margin-left:2px;
 }
+.link-plataforma{
+  font-family:'Trebuchet MS',sans-serif;font-size:10px;
+  letter-spacing:.08em;text-transform:uppercase;text-decoration:none;
+  color:var(--verde-claro);background:var(--verde-suave);
+  border:1px solid var(--verde-claro);border-radius:20px;
+  padding:3px 10px;margin-left:6px;white-space:nowrap;transition:.15s;
+}
+.link-plataforma:hover{background:var(--verde-claro);color:#fff}
 nav{display:flex;gap:4px;flex:1}
 .tab{
   background:none;border:none;cursor:pointer;
@@ -365,7 +373,8 @@ th .si{opacity:.45;font-size:10px}
 <header>
   <div class="marca">
     <svg viewBox="0 0 24 24" fill="none"><path d="M12 21C12 13 7 9 3 8c0 8 4 13 9 13Zm0 0c0-9 4-14 9-15-1 9-4 15-9 15Z" stroke="#1F4D2E" stroke-width="1.6" stroke-linejoin="round"/></svg>
-    WeGarden <small>Plataforma Comercial</small>
+    WeGarden <small>Plataforma Comercial de Construção</small>
+    <a class="link-plataforma" href="manutencao.html" title="Ir para a Plataforma de Manutenção">Manutenção ↗</a>
   </div>
   <nav>
     <button class="tab" data-tab="pipeline" onclick="mudarTab('pipeline')">Pipeline</button>
@@ -798,7 +807,7 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-10a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-10b'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
