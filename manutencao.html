@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>We Garden · Manutenção</title>
+<title>We Garden · Plataforma Comercial de Manutenção</title>
 <style>
 :root{
   --verde:#1F4D2E;
@@ -28,6 +28,8 @@ h1,h2,h3,.tab{font-family:'Trebuchet MS','Segoe UI',sans-serif}
 header{background:var(--branco);border-bottom:1px solid var(--linha);padding:0 28px;display:flex;align-items:center;gap:32px;position:sticky;top:0;z-index:50}
 .marca{font-family:Garamond,'Times New Roman',serif;font-size:22px;color:var(--verde);padding:16px 0;white-space:nowrap;display:flex;align-items:center;gap:8px}
 .marca small{font-family:'Trebuchet MS',sans-serif;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--cinza);border-left:1px solid var(--linha);padding-left:10px;margin-left:2px}
+.link-plataforma{font-family:'Trebuchet MS',sans-serif;font-size:10px;letter-spacing:.08em;text-transform:uppercase;text-decoration:none;color:var(--verde-claro);background:var(--verde-suave);border:1px solid var(--verde-claro);border-radius:20px;padding:3px 10px;margin-left:6px;white-space:nowrap;transition:.15s}
+.link-plataforma:hover{background:var(--verde-claro);color:#fff}
 nav{display:flex;gap:4px;flex:1}
 .tab{background:none;border:none;cursor:pointer;font-size:14px;color:var(--cinza);padding:20px 16px 17px;border-bottom:3px solid transparent;transition:color .15s,border-color .15s}
 .tab:hover{color:var(--tinta)}
@@ -122,7 +124,8 @@ footer{max-width:1280px;margin:0 auto;padding:10px 28px 26px;color:var(--cinza);
 <header>
   <div class="marca">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5-4 8-8.5 8-13a8 8 0 1 0-16 0c0 4.5 3 9 8 13z"/><path d="M12 8v6M9 11h6"/></svg>
-    We Garden <small>Manutenção</small>
+    We Garden <small>Plataforma Comercial de Manutenção</small>
+    <a class="link-plataforma" href="plataforma.html" title="Ir para a Plataforma de Construção">Construção ↗</a>
   </div>
   <nav>
     <button class="tab ativa" data-tab="pipeline" onclick="mudarTab('pipeline')">Pipeline</button>
@@ -335,7 +338,7 @@ footer{max-width:1280px;margin:0 auto;padding:10px 28px 26px;color:var(--cinza);
 <footer><span>We Garden · Plataforma de Manutenção</span><span id="rodapeBuild"></span></footer>
 
 <script>
-const BUILD = '2026-07-10a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-10b'; // ← actualizar em CADA publicação (data + letra)
 console.log('We Garden Manutenção · build ' + BUILD);
 document.getElementById('rodapeBuild').textContent = 'build ' + BUILD;
 
