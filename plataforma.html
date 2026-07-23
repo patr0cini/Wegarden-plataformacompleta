@@ -807,7 +807,8 @@ const PIPELINE = { // pipeline de pedidos (leitura + escrita: estado, responsáv
 const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
-const BUILD = '2026-07-10b'; // ← actualizar em CADA publicação (data + letra)
+const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
+const BUILD = '2026-07-10c'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -3968,7 +3969,8 @@ function abrirHistEdit(idx){
       '<div><label>Grau de interesse</label><select id="hGrau">' + ['','Baixo','Médio','Alto','Muito Alto'].map(v => '<option value="' + v + '"' + (grau === v ? ' selected' : '') + '>' + (v || '— automático —') + '</option>').join('') + '</select></div>' +
       fus +
       '<div class="full"><label>Nova nota de follow-up <span style="text-transform:none;letter-spacing:0;font-weight:400">(com data → lembrete agendado)</span></label>' +
-      '<div style="display:flex;gap:8px"><input id="hNovaNota" style="flex:1" placeholder="ex.: Ligar para saber a decisão"><input id="hNovaData" type="date" style="width:150px"></div></div>' +
+      '<div style="display:flex;gap:8px"><input id="hNovaNota" style="flex:1" placeholder="ex.: Ligar para saber a decisão"><input id="hNovaData" type="date" style="width:150px">' +
+      '<select id="hNovaResp" style="width:170px" title="Com data + responsável → a pessoa recebe email">' + opcoesEquipa('') + '</select></div></div>' +
     '</div>';
   $('histOverlay').classList.add('aberto');
 }
@@ -3979,6 +3981,17 @@ async function histGuardar(){
   const it = histLista[histEditIdx]; if (!it) return;
   const v = id => ($(id) ? $(id).value : '');
   const novaNota = v('hNovaNota').trim();
+  // responsável do novo lembrete (só se houver data — sem data é nota, não lembrete)
+  const novoResp = v('hNovaResp');
+  const novoRespP = novoResp ? equipaDe(novoResp) : null;
+  const lembNovo = d => ({ data: d, texto: novaNota, done: false, resp: novoResp || '', resp_email: novoRespP ? (novoRespP.email || '') : '' });
+  const avisarNovo = async d => {
+    if (!novoResp) return;
+    const ok = await notificarLembrete(novoResp, { texto: novaNota, data: d }, it.codigo, it.obra);
+    toast(ok ? '✉️ ' + novoResp + ' foi notificado por email'
+      : (novoRespP && !novoRespP.email ? novoResp + ' não tem email na equipa — não notificado' : 'Não consegui enviar o email a ' + novoResp),
+      ok ? undefined : 'erro');
+  };
   try {
     if (it.soSharePoint) {
       // Pasta "No SharePoint" — criar um registo NOVO no histórico de 2026.
@@ -3995,13 +4008,14 @@ async function histGuardar(){
       novo.progresso = novo.adjudicado === 'Sim' ? 'Adjudicado' : (novo.adjudicado === 'Não' ? 'Não Adjudicado' : '');
       if (novaNota) {
         const novaData = v('hNovaData');
-        if (novaData) novo.lembretes = [{ data: novaData, texto: novaNota, done: false }];
+        if (novaData) novo.lembretes = [lembNovo(novaData)];
         else novo.notasHist = [{ at: new Date().toISOString(), texto: novaNota }];
       }
       toast('A criar orçamento no histórico 2026… o servidor pode demorar a acordar');
       const criado = await histCriarNovo2026(novo);
       historicoAntigo.push(normalizarAntigo('2026', criado));
       toast('✓ Orçamento criado no histórico 2026');
+      if (novaNota && v('hNovaData')) await avisarNovo(v('hNovaData'));
       histFecharEdit();
       renderHistorico();
       return;
@@ -4025,7 +4039,7 @@ async function histGuardar(){
         const novaData = v('hNovaData');
         if (novaData) {
           const lembs = (Array.isArray(o.lembretes) ? o.lembretes.slice() : []);
-          lembs.push({ data: novaData, texto: novaNota, done: false });
+          lembs.push(lembNovo(novaData));
           lembs.sort((a, b) => String(a.data).localeCompare(String(b.data)));
           corpo.lembretes = lembs;
         } else {
@@ -4036,6 +4050,7 @@ async function histGuardar(){
       }
       await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(o.id), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify(corpo) });
       toast('Guardado na Plataforma');
+      if (novaNota && v('hNovaData')) await avisarNovo(v('hNovaData'));
       histFecharEdit();
       await carregarOrcamentos();
       renderHistorico();
@@ -4058,7 +4073,7 @@ async function histGuardar(){
       if (novaNota) {
         const novaData = v('hNovaData');
         if (novaData) {
-          mud.lembretes = (it.raw.lembretes || []).concat([{ data: novaData, texto: novaNota, done: false }])
+          mud.lembretes = (it.raw.lembretes || []).concat([lembNovo(novaData)])
             .sort((a, b) => String(a.data).localeCompare(String(b.data)));
         } else {
           mud.notasHist = (it.raw.notasHist || []).concat([{ at: new Date().toISOString(), texto: novaNota }]);
@@ -4070,6 +4085,7 @@ async function histGuardar(){
       const i = historicoAntigo.findIndex(h => h.fonte === it.fonte && h.idOrig === it.idOrig);
       if (i > -1) historicoAntigo[i] = normalizarAntigo(it.fonte, atualizado);
       toast('✓ Guardado em ' + it.fonte);
+      if (novaNota && v('hNovaData')) await avisarNovo(v('hNovaData'));
       histFecharEdit();
       renderHistorico();
     }
@@ -4154,16 +4170,47 @@ async function histCriarNovo2026(novo){
 let fuLista = [];
 let fuExpandido = null;   // índice (em fuLista) do follow-up aberto para edição, ou null
 
+/* ============================================================
+   Equipa — quem pode ficar responsável por um lembrete.
+   Lida da tabela `equipa`; sem email não há notificação (avisa na UI).
+   ============================================================ */
+let equipa = [];
+async function carregarEquipa(){
+  try { equipa = await db(NOVO, 'equipa?select=iniciais,nome,email,ativo&ativo=is.true&order=iniciais.asc') || []; }
+  catch (e) { equipa = []; console.warn('equipa:', e.message); }
+}
+function equipaDe(ini){ return equipa.find(p => p.iniciais === ini) || null; }
+function opcoesEquipa(sel){
+  return '<option value="">— sem responsável —</option>' +
+    equipa.map(p => '<option value="' + esc(p.iniciais) + '"' + (p.iniciais === sel ? ' selected' : '') + '>' +
+      esc(p.iniciais) + (p.nome ? ' · ' + esc(p.nome) : '') + (p.email ? '' : ' (sem email)') + '</option>').join('');
+}
+
+/* Notifica por email quem ficou com o lembrete (falha em silêncio — não bloqueia a gravação) */
+async function notificarLembrete(ini, lemb, codigo, obra){
+  const p = equipaDe(ini);
+  if (!p || !p.email) return false;
+  try {
+    const r = await fetch(FN_LEMBNOTIF, {
+      method: 'POST',
+      headers: { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ para: p.email, nome: p.nome || p.iniciais, texto: lemb.texto || '', data: lemb.data || '', codigo: codigo || '', obra: obra || '' })
+    });
+    const j = await r.json();
+    return !!j.enviado;
+  } catch (e) { console.warn('notificar:', e.message); return false; }
+}
+
 function fuItens(){
   const out = [];
   orcamentos.forEach(o => (Array.isArray(o.lembretes) ? o.lembretes : []).forEach((l, li) => out.push({
     fonte:'Plataforma', chave:o.id, li, data:String(l.data || ''), texto:l.texto || '', done:!!l.done,
-    notas: Array.isArray(l.notas) ? l.notas : [],
+    notas: Array.isArray(l.notas) ? l.notas : [], resp: l.resp || '',
     codigo:o.id, obra:o.nome_obra || ''
   })));
   historicoAntigo.forEach(h => ((h.raw && h.raw.lembretes) || []).forEach((l, li) => out.push({
     fonte:h.fonte, chave:h.idOrig, li, data:String(l.data || ''), texto:l.texto || '', done:!!l.done,
-    notas: Array.isArray(l.notas) ? l.notas : [],
+    notas: Array.isArray(l.notas) ? l.notas : [], resp: l.resp || '',
     codigo:h.codigo, obra:h.obra
   })));
   return out;
@@ -4210,7 +4257,8 @@ function fuRender(){
         '<div class="fu-conteudo" onclick="fuExpandir(' + i + ')" title="Clica para editar">' +
           '<div class="fu-data">' + dataLbl + ' · <b>' + esc(x.codigo) + '</b> <span class="chip ' + (x.fonte === 'Plataforma' ? 'verde' : 'cinza') + '">' + esc(x.fonte) + '</span>' +
             (nNotas ? '<span class="fu-notas-badge" title="' + nNotas + ' nota(s) neste follow-up">🗒 ' + nNotas + '</span>' : '') + '</div>' +
-          '<div class="fu-texto">' + esc(x.texto) + '</div>' +
+          '<div class="fu-texto">' + esc(x.texto) +
+            (x.resp ? ' <span class="resp-pill" title="Responsável por este follow-up">' + esc(x.resp) + '</span>' : '') + '</div>' +
           (x.obra ? '<div class="fu-obra">' + esc(x.obra.length > 60 ? x.obra.slice(0,59) + '…' : x.obra) + '</div>' : '') +
         '</div>' +
         '<div class="fu-btns">' +
@@ -4223,6 +4271,7 @@ function fuRender(){
       html += '<div class="fu-editor">' +
         '<div class="fu-ed-data-linha">' +
           '<label class="fu-ed-lbl">Data<input type="date" id="fuEdData" value="' + esc(x.data || '') + '"></label>' +
+          '<label class="fu-ed-lbl">Responsável (recebe email)<select id="fuEdResp">' + opcoesEquipa(x.resp) + '</select></label>' +
         '</div>' +
         '<label class="fu-ed-lbl">Follow-up<textarea id="fuEdTexto" rows="2">' + esc(x.texto) + '</textarea></label>' +
         '<div class="fu-ed-notas-titulo">Histórico deste follow-up</div>' +
@@ -4286,7 +4335,8 @@ function fuExpandir(i){
 function fuLerCampos(){
   return {
     data: ($('fuEdData') ? $('fuEdData').value : null),
-    texto: ($('fuEdTexto') ? $('fuEdTexto').value.trim() : null)
+    texto: ($('fuEdTexto') ? $('fuEdTexto').value.trim() : null),
+    resp: ($('fuEdResp') ? $('fuEdResp').value : null)
   };
 }
 
@@ -4307,14 +4357,30 @@ async function fuAplicar(i, mutador, manterAberto){
 
 /* guardar data + texto editados do follow-up */
 async function fuGuardarEdit(i){
+  const x = fuLista[i];
   const c = fuLerCampos();
   if (c.texto !== null && !c.texto) { toast('O follow-up precisa de texto', 'erro'); return; }
+  const respAntes = x ? (x.resp || '') : '';
+  const respNovo = c.resp != null ? c.resp : respAntes;
+  const p = respNovo ? equipaDe(respNovo) : null;
   await fuAplicar(i, lemb => ({
     ...lemb,
     data: c.data != null ? c.data : lemb.data,
-    texto: c.texto || lemb.texto
+    texto: c.texto || lemb.texto,
+    resp: respNovo,
+    resp_email: p ? (p.email || '') : ''
   }), false);
-  toast('✓ Follow-up actualizado');
+  // mudou de responsável → avisar por email quem ficou com ele
+  if (respNovo && respNovo !== respAntes) {
+    const enviado = await notificarLembrete(respNovo, {
+      texto: c.texto || (x ? x.texto : ''), data: c.data != null ? c.data : (x ? x.data : '')
+    }, x ? x.codigo : '', x ? x.obra : '');
+    toast(enviado ? '✓ Follow-up atribuído a ' + respNovo + ' — email enviado ✉️'
+      : '✓ Follow-up atribuído a ' + respNovo + (p && !p.email ? ' (sem email na equipa — não notificado)' : ' — não consegui enviar o email'),
+      enviado ? undefined : 'erro');
+  } else {
+    toast('✓ Follow-up actualizado');
+  }
 }
 
 /* adicionar uma nota ao histórico do follow-up (persiste também data/texto correntes) */
@@ -4392,6 +4458,7 @@ window.addEventListener('beforeunload', e => {
 });
 
 mudarTab('pipeline');
+carregarEquipa();
 carregarPrecos();
 carregarPedidos();
 carregarOrcamentos();
