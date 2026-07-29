@@ -323,6 +323,8 @@ footer{
 .xls-tab{border-collapse:collapse;font-size:12px;white-space:nowrap}
 .xls-tab td{border:1px solid #ececec;padding:3px 7px;max-width:300px;overflow:hidden;text-overflow:ellipsis}
 .xls-tab tr:first-child td{background:#f4f7f2;font-weight:600;position:sticky;top:0}
+.ln-auto{display:inline-block;margin-left:6px;font-size:10px;font-weight:700;color:#2f6b2a;background:#e7f2e2;border:1px solid #cfe6c6;border-radius:10px;padding:1px 6px;vertical-align:middle}
+.ln-auto-row td{background:#f6faf4}
 .am-resumo{text-align:center;padding:10px 0}
 .am-resumo .nums{display:flex;justify-content:center;gap:26px;margin-top:14px}
 .am-resumo .nums > div{display:flex;flex-direction:column;font-size:12px;color:var(--cinza)}
@@ -516,7 +518,8 @@ th .si{opacity:.45;font-size:10px}
         <button class="btn ghost mini" onclick="adicionarLinha('subcapitulo')">+ Subcapítulo</button>
         <button class="btn ghost mini" onclick="adicionarLinha('artigo')">+ Linha manual</button>
         <span class="sep"></span>
-        <button class="btn ghost mini" onclick="matchAutomatico()" title="Percorrer os artigos sem preço e sugerir correspondências da tabela, uma a uma">⚡ Match automático</button>
+        <button class="btn primario mini" onclick="autoPreencher()" title="Preenche automaticamente todos os artigos sem preço cujo melhor match é ≥90%. Marca-os com ⚡ para validares.">⚡ Auto ≥90%</button>
+        <button class="btn ghost mini" onclick="matchAutomatico()" title="Percorrer os artigos sem preço e sugerir correspondências da tabela, uma a uma">⚡ Match manual</button>
         <button class="btn ghost mini" onclick="document.getElementById('importFile').click()" title="Importar mapa de quantidades do computador">⬆ Importar do computador</button>
         <button class="btn ghost mini" onclick="spAbrir()" title="Abrir mapa de quantidades a partir do SharePoint">☁ Importar do SharePoint</button>
         <input type="file" id="importFile" accept=".xlsx,.xls,.xlsm" style="display:none" onchange="importarExcel(this.files[0]); this.value=''">
@@ -850,7 +853,7 @@ const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
-const BUILD = '2026-07-29c'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-29d'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -2618,8 +2621,9 @@ function renderLinhas(){
         '<td class="col-acao"><button class="btn perigo" onclick="removerLinha(' + i + ')">✕</button></td>' +
         '</tr>';
     }
-    return '<tr>' +
-      '<td class="col-num clicavel" onclick="abrirMatching(' + i + ')" title="Procurar na tabela de preços">' + l.num + '</td>' +
+    return '<tr' + (l._auto ? ' class="ln-auto-row"' : '') + '>' +
+      '<td class="col-num clicavel" onclick="abrirMatching(' + i + ')" title="Procurar na tabela de preços">' + l.num +
+        (l._auto ? '<span class="ln-auto" title="Preenchido automaticamente (' + l._auto + '%) — valida ou edita">⚡' + l._auto + '%</span>' : '') + '</td>' +
       '<td><input data-i="' + i + '" data-f="descricao" value="' + esc(l.descricao) + '" placeholder="Descrição"></td>' +
       '<td><input data-i="' + i + '" data-f="unidade" value="' + esc(l.unidade) + '" placeholder="un"></td>' +
       '<td><input class="num" data-i="' + i + '" data-f="quantidade" value="' + (l.quantidade ?? '') + '"></td>' +
@@ -2637,6 +2641,11 @@ $('linhasCorpo').addEventListener('input', e => {
   const i = +inp.dataset.i, f = inp.dataset.f;
   const l = atual.linhas[i]; if (!l) return;
   marcarSujo();
+  // editar a linha = validação do orçamentista → retira a marca de auto-preenchido
+  if (l._auto && (f === 'preco_unitario' || f === 'descricao')) {
+    delete l._auto;
+    const tr = inp.closest('tr'); if (tr) { tr.classList.remove('ln-auto-row'); const b = tr.querySelector('.ln-auto'); if (b) b.remove(); }
+  }
   if (f === 'quantidade' || f === 'preco_unitario') {
     l[f] = numPT(inp.value);
     const cel = $('lt' + i);
@@ -2793,6 +2802,43 @@ function aplicarMatch(j){
 }
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('painelMatch').hidden) fecharMatching(); });
+
+/* ============================================================
+   Fase 2 — Auto-preenchimento de preços (matches ≥90%)
+   Percorre os artigos sem preço, aplica o melhor match da tabela quando
+   a confiança é ≥90% e marca a linha com ⚡ para o orçamentista validar.
+   O resto (com match <90% ou sem match) vai ao assistente manual.
+   ============================================================ */
+const LIMIAR_AUTO = 0.90;
+function autoPreencher(){
+  if (!atual) return;
+  if (!precos.length) { toast('A tabela de preços ainda não carregou — vê o estado no topo.', 'erro'); return; }
+  prepararIndice();
+  let nAuto = 0, nRever = 0, nSem = 0;
+  atual.linhas.forEach(l => {
+    if (l.tipo !== 'artigo' || (l.preco_unitario > 0) || !(l.descricao || '').trim()) return;
+    const res = searchPrecos(l.descricao, 1);
+    if (!res.length) { nSem++; return; }
+    const [score, j] = res[0];
+    if (score >= LIMIAR_AUTO) {
+      const a = precos[j];
+      l.preco_unitario = a.p;
+      if (!l.unidade) l.unidade = a.u || '';
+      l.codigo = a.c || null;
+      l._auto = Math.round(score * 100);
+      nAuto++;
+    } else { nRever++; }
+  });
+  if (nAuto) marcarSujo();
+  renderLinhas();
+  const restam = nRever + nSem;
+  if (!nAuto && !restam) { toast('Todos os artigos já têm preço — nada a fazer.'); return; }
+  toast('⚡ ' + nAuto + ' preenchido' + (nAuto !== 1 ? 's' : '') + ' automaticamente (≥90%)' +
+    (restam ? ' · ' + restam + ' por rever' : '') + (nAuto ? '. Valida as linhas ⚡.' : '.'));
+  if (nRever > 0 && confirm(nAuto + ' artigo(s) preenchido(s) automaticamente (≥90%).\n\n' +
+      nRever + ' artigo(s) têm correspondência mas abaixo de 90% e precisam de ti.\n\nAbrir o assistente manual para os rever agora?'))
+    matchAutomatico();
+}
 
 /* ============================================================
    Assistente de match automático (cartão a cartão)
