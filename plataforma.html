@@ -318,6 +318,11 @@ footer{
 .np-cod{font-size:13px;color:#2f6b2a}
 .np-ref{font-size:11px;color:var(--cinza)}
 .np-cab{font-size:12px;color:#3a6b34;background:#eef5ea;border:1px solid #d6e6cf;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.4}
+.xls-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.xls-wrap{overflow:auto;max-height:62vh;border:1px solid #e4e4e4;border-radius:8px}
+.xls-tab{border-collapse:collapse;font-size:12px;white-space:nowrap}
+.xls-tab td{border:1px solid #ececec;padding:3px 7px;max-width:300px;overflow:hidden;text-overflow:ellipsis}
+.xls-tab tr:first-child td{background:#f4f7f2;font-weight:600;position:sticky;top:0}
 .am-resumo{text-align:center;padding:10px 0}
 .am-resumo .nums{display:flex;justify-content:center;gap:26px;margin-top:14px}
 .am-resumo .nums > div{display:flex;flex-direction:column;font-size:12px;color:var(--cinza)}
@@ -672,6 +677,17 @@ th .si{opacity:.45;font-size:10px}
   </div>
 </div>
 
+<div id="xlsxOverlay" class="am-overlay" style="z-index:90">
+  <div class="am-caixa" style="max-width:940px">
+    <div class="am-cab" style="display:flex;justify-content:space-between;align-items:center">
+      <b id="xlsTitulo">📊 Pré-visualização</b>
+      <button class="btn ghost mini" onclick="xlsFechar()">✕ Fechar</button>
+    </div>
+    <div class="am-corpo" id="xlsCorpo"></div>
+    <div class="am-acoes"><button class="btn ghost" onclick="xlsDescarregar()">⬇ Descarregar</button><button class="btn ghost" onclick="xlsFechar()">Fechar</button></div>
+  </div>
+</div>
+
 <style>
 /* ===== Modal de mapeamento de colunas ===== */
 .cm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.52);z-index:4000;display:none;align-items:center;justify-content:center}
@@ -834,7 +850,7 @@ const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
-const BUILD = '2026-07-29a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-29b'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -1356,6 +1372,42 @@ async function verEmailPedido(pid){
     window.open(msg.link, '_blank', 'noopener');
   } catch (e) { toast('Erro: ' + e.message, 'erro'); }
 }
+// pré-visualização rápida do Excel do orçamento (sem download) — usa o SheetJS já embebido
+let XLSPREV = null;
+function xlsFechar(){ $('xlsxOverlay').classList.remove('aberto'); XLSPREV = null; }
+function xlsAba(i){ if (XLSPREV) { XLSPREV.idx = i; xlsRender(); } }
+function xlsDescarregar(){
+  if (!XLSPREV) return;
+  const blob = new Blob([XLSPREV.buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const el = document.createElement('a');
+  el.href = url; el.download = XLSPREV.nome || 'orcamento.xlsx';
+  document.body.appendChild(el); el.click(); el.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+function xlsRender(){
+  if (!XLSPREV) return;
+  const nome = XLSPREV.sheetNames[XLSPREV.idx];
+  const ws = XLSPREV.wb.Sheets[nome];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
+  const totC = rows.reduce((m, r) => Math.max(m, r.length), 0);
+  const MAXR = 300, MAXC = 40;
+  const nR = Math.min(rows.length, MAXR), nC = Math.min(totC, MAXC);
+  let html = '';
+  if (XLSPREV.sheetNames.length > 1)
+    html += '<div class="xls-tabs">' + XLSPREV.sheetNames.map((s, i) =>
+      '<button class="btn mini ' + (i === XLSPREV.idx ? 'primario' : 'ghost') + '" onclick="xlsAba(' + i + ')">' + esc(s) + '</button>').join('') + '</div>';
+  html += '<div class="xls-wrap"><table class="xls-tab"><tbody>';
+  for (let i = 0; i < nR; i++) {
+    html += '<tr>';
+    for (let c = 0; c < nC; c++) { const v = rows[i][c]; html += '<td>' + esc(v === undefined || v === null ? '' : String(v)) + '</td>'; }
+    html += '</tr>';
+  }
+  html += '</tbody></table></div>';
+  if (rows.length > MAXR || totC > MAXC)
+    html += '<div class="pm-meta" style="padding:6px 2px">Pré-visualização parcial (' + nR + ' de ' + rows.length + ' linhas' + (totC > MAXC ? ', primeiras ' + MAXC + ' de ' + totC + ' colunas' : '') + ') — descarrega para ver tudo.</div>';
+  $('xlsCorpo').innerHTML = html;
+}
 async function abrirExcelPedido(pid){
   const p = pedidos.find(x => String(x.id) === String(pid)); if (!p) return;
   toast('A procurar o Excel no email…');
@@ -1367,18 +1419,17 @@ async function abrirExcelPedido(pid){
     if (!ja.ok) { toast(ja.message || 'Não consegui listar os anexos.', 'erro'); return; }
     const excels = (ja.anexos || []).filter(a => /\.(xlsx|xlsm|xls)$/i.test(a.nome || '') || /spreadsheet|excel/i.test(a.tipo || ''));
     if (!excels.length) { toast('Este email não traz Excel — usa «Ver email» para o conteúdo.', 'erro'); return; }
-    for (const a of excels) {
-      const r = await fetch(FN_EMAIL + '?acao=anexo&id=' + encodeURIComponent(msg.id) + '&anexo=' + encodeURIComponent(a.id), H);
-      if (!r.ok) { toast('Não consegui abrir «' + a.nome + '».', 'erro'); continue; }
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      const el = document.createElement('a');
-      el.href = url; el.download = a.nome || 'orcamento.xlsx';
-      document.body.appendChild(el); el.click(); el.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    }
-    toast('Excel descarregado — abre no Excel para avaliar.');
-  } catch (e) { toast('Erro: ' + e.message, 'erro'); }
+    const a = excels[0];
+    toast('A abrir «' + a.nome + '»…');
+    const r = await fetch(FN_EMAIL + '?acao=anexo&id=' + encodeURIComponent(msg.id) + '&anexo=' + encodeURIComponent(a.id), H);
+    if (!r.ok) { toast('Não consegui abrir «' + a.nome + '».', 'erro'); return; }
+    const buf = await r.arrayBuffer();
+    const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+    XLSPREV = { wb, buf, nome: a.nome, sheetNames: wb.SheetNames, idx: 0 };
+    $('xlsTitulo').textContent = '📊 ' + a.nome + (excels.length > 1 ? '  (+' + (excels.length - 1) + ' outro' + (excels.length - 1 > 1 ? 's' : '') + ' no email)' : '');
+    xlsRender();
+    $('xlsxOverlay').classList.add('aberto');
+  } catch (e) { toast('Erro na pré-visualização: ' + e.message, 'erro'); }
 }
 async function confirmarNovo(pid){
   const p = pedidos.find(x => String(x.id) === String(pid)); if (!p) return;
