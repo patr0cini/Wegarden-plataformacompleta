@@ -304,6 +304,20 @@ footer{
 .am-pct.medio{background:#fdf3dd;color:#8a6612}
 .am-teclas{margin-top:12px;font-size:12px;color:var(--cinza)}
 .am-acoes{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #eee}
+.np-card{border:1px solid #e4e4e4;border-radius:10px;padding:12px 14px;background:#fafafa;margin-bottom:10px}
+.np-top{display:flex;align-items:center;gap:8px;font-size:14px}
+.np-top .np-data{margin-left:auto;font-size:12px;color:var(--cinza)}
+.np-desc{font-size:13px;font-weight:600;margin:6px 0 2px;line-height:1.35}
+.np-meta{font-size:12px;color:var(--cinza);margin-bottom:8px}
+.np-badge{font-size:11px;padding:2px 7px;border-radius:20px;font-weight:600}
+.np-badge.novo{background:#eef5ea;color:#3a6b34}
+.np-badge.fora{background:#f6e9e2;color:#a5502a}
+.np-badge.rever{background:#fdf3d8;color:#8a6d1a}
+.np-fich{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.np-acoes{display:flex;gap:8px;flex-wrap:wrap;border-top:1px dashed #e0e0e0;padding-top:10px}
+.np-cod{font-size:13px;color:#2f6b2a}
+.np-ref{font-size:11px;color:var(--cinza)}
+.np-cab{font-size:12px;color:#3a6b34;background:#eef5ea;border:1px solid #d6e6cf;border-radius:8px;padding:8px 10px;margin-bottom:10px;line-height:1.4}
 .am-resumo{text-align:center;padding:10px 0}
 .am-resumo .nums{display:flex;justify-content:center;gap:26px;margin-top:14px}
 .am-resumo .nums > div{display:flex;flex-direction:column;font-size:12px;color:var(--cinza)}
@@ -400,6 +414,7 @@ th .si{opacity:.45;font-size:10px}
       <button class="btn mini primario" id="pipVistaAtivos" onclick="mudarVistaPip('ativos')">Ativos</button>
       <button class="btn mini ghost" id="pipVistaRever" onclick="mudarVistaPip('rever')">❓ Para rever <span id="pipReverN"></span></button>
       <button class="btn mini ghost" id="pipVistaFora" onclick="mudarVistaPip('fora')">🚫 Fora de Zona <span id="pipForaN"></span></button>
+      <button class="btn mini primario" id="btnNovos" style="display:none;margin-left:auto" onclick="abrirNovosPedidos()"></button>
     </div>
     <div class="filtros">
       <input type="text" id="pipPesquisa" placeholder="Pesquisar pedido, remetente, localização…" oninput="renderPipeline()">
@@ -646,6 +661,17 @@ th .si{opacity:.45;font-size:10px}
   </div>
 </div>
 
+<div id="novosOverlay" class="am-overlay">
+  <div class="am-caixa" style="max-width:720px">
+    <div class="am-cab" style="display:flex;justify-content:space-between;align-items:center">
+      <b>🆕 Novos pedidos por confirmar</b>
+      <button class="btn ghost mini" onclick="novosFechar()">✕ Fechar</button>
+    </div>
+    <div class="am-corpo" id="npCorpo"></div>
+    <div class="am-acoes"><button class="btn ghost" onclick="novosFechar()">Fechar</button></div>
+  </div>
+</div>
+
 <style>
 /* ===== Modal de mapeamento de colunas ===== */
 .cm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.52);z-index:4000;display:none;align-items:center;justify-content:center}
@@ -808,7 +834,7 @@ const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
-const BUILD = '2026-07-10c'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-29a'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -1062,6 +1088,8 @@ async function carregarPedidos(){
     $('pipEstado').innerHTML = '<option value="">Todos os estados</option>' + pipEstados.filter(e => e !== 'Fora de Zona' && e !== 'Para rever').map(e => '<option>' + esc(e) + '</option>').join('');
     renderPipeline();
     estadoTriagem();
+    atualizarBadgeNovos();
+    talvezAbrirNovos();         // Fase 1: pop-up de novos pedidos por confirmar (auto, 1x por carregamento)
     reconciliarNoSharePoint();  // marca "No SharePoint" os que já têm pasta mas ainda estão "Não iniciado"
   } catch (e) {
     $('pipCorpo').innerHTML = '<tr><td colspan="11" class="vazio">Não foi possível ler a pipeline — ' + esc(e.message) + '</td></tr>';
@@ -1209,6 +1237,174 @@ async function apagarPedido(id){
     toast('Pedido apagado da pipeline');
     renderPipeline();
   } catch (e) { toast('Erro ao apagar: ' + e.message, 'erro'); }
+}
+
+/* ============================================================
+   Fase 1 — Pop-up «Novos pedidos por confirmar» (triagem → decisão)
+   Abre ao carregar a plataforma. Mostra os pedidos vindos de email
+   ainda sem pasta; deixa ver o Excel do orçamento (anexo) e decidir:
+   ✓ Confirmar (cria pasta + arquiva email)  ·  🚫 Fora de zona  ·  ✕ Rejeitar.
+   ============================================================ */
+let novosAdiados = new Set();   // ids adiados nesta sessão («Depois»)
+let novosJaAbriu = false;       // auto-abrir só uma vez por carregamento
+const emailCacheNovos = {};     // pid -> mensagem escolhida (evita repetir pesquisas)
+let proxNumSP = null;           // próximo nº de código livre em 2026 (lido do SharePoint via app creds)
+
+// lê as pastas de 2026 pela edge function (credenciais de aplicação — não precisa de login MS)
+async function carregarProximoCodigoSP(){
+  try {
+    const r = await fetch(FN_SPFICH + '?acao=pastas2026', { headers: { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key } });
+    const j = await r.json();
+    if (!j.ok || !j.pastas) return null;
+    let max = 0;
+    for (const pp of j.pastas) { const m = String(pp.codigo || '').match(/^ocWG26_(\d+)$/i); if (m) { const n = +m[1]; if (n > max) max = n; } }
+    proxNumSP = max ? max + 1 : null;
+    return proxNumSP;
+  } catch (_) { return null; }
+}
+
+function pedidosPorConfirmar(){
+  return pedidos.filter(p =>
+    p.origem_email_id && !p.sharepoint_url && !p.associado_a &&
+    (p.estado === 'Não iniciado' || p.estado === 'Fora de Zona' || p.estado === 'Para rever')
+  );
+}
+function novosPendentes(){ return pedidosPorConfirmar().filter(p => !novosAdiados.has(String(p.id))); }
+
+function atualizarBadgeNovos(){
+  const b = $('btnNovos'); if (!b) return;
+  const n = novosPendentes().length;
+  if (n > 0) { b.style.display = ''; b.textContent = '🆕 ' + n + ' novo' + (n !== 1 ? 's' : '') + ' por confirmar'; }
+  else b.style.display = 'none';
+}
+function talvezAbrirNovos(){
+  if (novosJaAbriu) return;
+  if (novosPendentes().length) { novosJaAbriu = true; abrirNovosPedidos(); }
+}
+
+function badgeNovo(p){
+  if (p.estado === 'Fora de Zona') return '<span class="np-badge fora">🚫 fora de zona</span>';
+  if (p.estado === 'Para rever')  return '<span class="np-badge rever">❓ rever</span>';
+  return '<span class="np-badge novo">📥 novo</span>';
+}
+function cardNovo(p, cod){
+  const idJs = esc(String(p.id)).replace(/'/g, "\\'");
+  const loc = (p.localizacao && p.localizacao !== '—') ? p.localizacao : '—';
+  return '<div class="np-card" id="np-' + esc(String(p.id)) + '">' +
+    '<div class="np-top">' + badgeNovo(p) +
+      (cod ? '<b class="np-cod">→ ' + esc(cod) + '</b>' : '') +
+      '<span class="np-ref" title="referência interna da pipeline — não é o código do orçamento">ref. ' + esc(p.id) + '</span>' +
+      '<span class="np-data">' + esc(fmtData(p.data)) + '</span></div>' +
+    '<div class="np-desc">' + esc(p.pedido || '(sem descrição)') + '</div>' +
+    '<div class="np-meta">' + esc(p.tipo || '—') + ' · ' + esc(p.remetente || '—') + ' · 📍 ' + esc(loc) + '</div>' +
+    '<div class="np-fich">' +
+      '<button class="btn mini ghost" onclick="abrirExcelPedido(\'' + idJs + '\')">📊 Abrir Excel do orçamento</button>' +
+      '<button class="btn mini ghost" onclick="verEmailPedido(\'' + idJs + '\')">✉ Ver email</button>' +
+    '</div>' +
+    '<div class="np-acoes">' +
+      '<button class="btn mini primario" onclick="confirmarNovo(\'' + idJs + '\')">✓ Confirmar (pasta + arquivo)</button>' +
+      (p.estado !== 'Fora de Zona' ? '<button class="btn mini ghost" onclick="marcarForaNovo(\'' + idJs + '\')">🚫 Fora de zona</button>' : '') +
+      '<button class="btn mini ghost" onclick="rejeitarNovo(\'' + idJs + '\')">✕ Rejeitar</button>' +
+      '<button class="btn mini ghost" onclick="adiarNovo(\'' + idJs + '\')">Depois</button>' +
+    '</div></div>';
+}
+function abrirNovosPedidos(){
+  const lista = novosPendentes();
+  const corpo = $('npCorpo');
+  if (!lista.length) {
+    corpo.innerHTML = '<div class="fu-vazio" style="padding:24px">Sem novos pedidos por confirmar. 👍</div>';
+  } else {
+    const cab = proxNumSP
+      ? '<div class="np-cab">Próximo código de orçamento livre no SharePoint: <b>ocWG26_' + String(proxNumSP).padStart(3, '0') + '</b>. Cada «novo» recebe o seguinte, por ordem, ao confirmares. <span style="opacity:.7">(«ref.» = referência interna da pipeline, não é o código.)</span></div>'
+      : '<div class="np-cab">A obter o próximo código do SharePoint…</div>';
+    let seq = proxNumSP;
+    const cards = lista.map(p => {
+      let cod = null;
+      if (p.estado === 'Não iniciado' && seq) { cod = 'ocWG26_' + String(seq).padStart(3, '0'); seq++; }
+      return cardNovo(p, cod);
+    }).join('');
+    corpo.innerHTML = cab + '<div class="am-sec">' + lista.length + ' pedido' + (lista.length !== 1 ? 's' : '') + ' por confirmar — vê o Excel do orçamento e decide</div>' + cards;
+  }
+  $('novosOverlay').classList.add('aberto');
+  atualizarBadgeNovos();
+  if (proxNumSP === null) carregarProximoCodigoSP().then(v => { if (v && $('novosOverlay').classList.contains('aberto')) abrirNovosPedidos(); });
+}
+function novosFechar(){ $('novosOverlay').classList.remove('aberto'); }
+function removerCardNovo(pid){
+  const el = $('np-' + pid); if (el) el.remove();
+  atualizarBadgeNovos();
+  if (!novosPendentes().length) { const c = $('npCorpo'); if (c) c.innerHTML = '<div class="fu-vazio" style="padding:24px">Sem novos pedidos por confirmar. 👍</div>'; }
+}
+function adiarNovo(pid){ novosAdiados.add(String(pid)); removerCardNovo(pid); }
+
+// procurar (e cachear) o email de um pedido; devolve a mensagem escolhida ou null
+async function acharEmailPedido(p){
+  if (emailCacheNovos[p.id]) return emailCacheNovos[p.id];
+  const u = FN_EMAIL + '?email=' + encodeURIComponent(p.email || '') + '&data=' + encodeURIComponent(p.data || '') + '&assunto=' + encodeURIComponent(p.pedido || '');
+  const jr = await (await fetch(u, { headers: { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key } })).json();
+  if (!jr.ok || !jr.mensagens || !jr.mensagens.length) return null;
+  const msg = jr.mensagens.find(m => m.anexos) || jr.mensagens[0];  // preferir a que tem anexos
+  emailCacheNovos[p.id] = msg;
+  return msg;
+}
+async function verEmailPedido(pid){
+  const p = pedidos.find(x => String(x.id) === String(pid)); if (!p) return;
+  toast('A localizar o email…');
+  try {
+    const msg = await acharEmailPedido(p);
+    if (!msg || !msg.link) { toast('Email não encontrado na caixa orcamentos@.', 'erro'); return; }
+    window.open(msg.link, '_blank', 'noopener');
+  } catch (e) { toast('Erro: ' + e.message, 'erro'); }
+}
+async function abrirExcelPedido(pid){
+  const p = pedidos.find(x => String(x.id) === String(pid)); if (!p) return;
+  toast('A procurar o Excel no email…');
+  try {
+    const msg = await acharEmailPedido(p);
+    if (!msg) { toast('Email não encontrado na caixa orcamentos@.', 'erro'); return; }
+    const H = { headers: { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key } };
+    const ja = await (await fetch(FN_EMAIL + '?acao=anexos&id=' + encodeURIComponent(msg.id), H)).json();
+    if (!ja.ok) { toast(ja.message || 'Não consegui listar os anexos.', 'erro'); return; }
+    const excels = (ja.anexos || []).filter(a => /\.(xlsx|xlsm|xls)$/i.test(a.nome || '') || /spreadsheet|excel/i.test(a.tipo || ''));
+    if (!excels.length) { toast('Este email não traz Excel — usa «Ver email» para o conteúdo.', 'erro'); return; }
+    for (const a of excels) {
+      const r = await fetch(FN_EMAIL + '?acao=anexo&id=' + encodeURIComponent(msg.id) + '&anexo=' + encodeURIComponent(a.id), H);
+      if (!r.ok) { toast('Não consegui abrir «' + a.nome + '».', 'erro'); continue; }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const el = document.createElement('a');
+      el.href = url; el.download = a.nome || 'orcamento.xlsx';
+      document.body.appendChild(el); el.click(); el.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+    toast('Excel descarregado — abre no Excel para avaliar.');
+  } catch (e) { toast('Erro: ' + e.message, 'erro'); }
+}
+async function confirmarNovo(pid){
+  const p = pedidos.find(x => String(x.id) === String(pid)); if (!p) return;
+  if (p.sharepoint_url) { toast('Este pedido já tem pasta.'); removerCardNovo(pid); return; }
+  await criarPastaPedido(pid, { auto: true });
+  if (!p.sharepoint_url) return;   // criação cancelada/falhou (o erro já foi mostrado)
+  removerCardNovo(pid);
+  novosFechar();
+  arquivarEmail(pid);   // encadeia o arquivamento do email (destinos pré-preenchidos)
+}
+async function marcarForaNovo(pid){
+  await mudarEstadoPedido(pid, 'Fora de Zona');
+  adiarNovo(pid);
+  toast('Marcado como fora de zona.');
+}
+async function rejeitarNovo(pid){
+  const p = pedidos.find(x => String(x.id) === String(pid)); if (!p) return;
+  if (!confirm('Rejeitar este pedido?\n\n« ' + (p.pedido || p.id) + ' »\n\nSai da pipeline e o email deixa de ser reimportado. Irreversível.')) return;
+  try {
+    await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(p.id), { method:'DELETE', headers:{ 'Prefer':'return=minimal' } });
+    if (p.origem_email_id) await registarIgnorar('email_id', p.origem_email_id, 'rejeitado: ' + (p.pedido || ''));
+    pedidos = pedidos.filter(x => String(x.id) !== String(p.id));
+    removerCardNovo(pid);
+    renderPipeline();
+    toast('Pedido rejeitado.');
+  } catch (e) { toast('Erro ao rejeitar: ' + e.message, 'erro'); }
 }
 
 /* ============================================================
@@ -1442,7 +1638,7 @@ async function proximoCodigo2026(){
   return { ultimo: 'ocWG26_' + String(maxN).padStart(3, '0'), proximo: 'ocWG26_' + String(maxN + 1).padStart(3, '0') };
 }
 
-async function criarPastaPedido(pid){
+async function criarPastaPedido(pid, opts){
   const p = pedidos.find(x => String(x.id) === String(pid));
   if (!p) return;
   // garantir sessão Microsoft (reutiliza o login do SharePoint)
@@ -1483,8 +1679,13 @@ async function criarPastaPedido(pid){
   }
   // nome por defeito: «código nome» (ou só o que houver)
   const base = [sugestaoCodigo, p.pedido].filter(Boolean).join(' ').trim() || ('Pedido ' + p.id);
-  let nome = prompt(avisoCodigo + 'Nome da pasta a criar em Orçamentos Construção / 2026:', base);
-  if (nome === null) return;
+  let nome;
+  if (opts && opts.auto) {
+    nome = base;   // modo automático (pop-up de confirmação): sem prompt
+  } else {
+    nome = prompt(avisoCodigo + 'Nome da pasta a criar em Orçamentos Construção / 2026:', base);
+    if (nome === null) return;
+  }
   nome = nome.trim().replace(/[\\/:*?"<>|]/g, '-');
   if (!nome) { toast('Nome inválido.', 'erro'); return; }
   toast('A criar a pasta no SharePoint…');
