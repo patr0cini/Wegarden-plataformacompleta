@@ -850,7 +850,7 @@ const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
-const BUILD = '2026-07-29b'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-29c'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -1437,8 +1437,67 @@ async function confirmarNovo(pid){
   await criarPastaPedido(pid, { auto: true });
   if (!p.sharepoint_url) return;   // criação cancelada/falhou (o erro já foi mostrado)
   removerCardNovo(pid);
-  novosFechar();
-  arquivarEmail(pid);   // encadeia o arquivamento do email (destinos pré-preenchidos)
+  arquivarEmailAuto(pid);   // arquiva o email automaticamente (recua para o painel guiado se preciso)
+}
+
+// arquivamento 100% automático (sem UI). Destinos por defeito: .eml→Emails,
+// pdf/dwg/dwf→Peças Desenhadas, resto→Orçamentos; inline ignorados.
+// Recua para o painel guiado arquivarEmail(pid) se houver >1 email candidato ou erro.
+async function arquivarEmailAuto(pid){
+  const p = pedidos.find(x => String(x.id) === String(pid));
+  if (!p || !p.sharepoint_url) return;
+  const H = { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key };
+  try {
+    const u = FN_EMAIL + '?email=' + encodeURIComponent(p.email || '') + '&data=' + encodeURIComponent(p.data || '') + '&assunto=' + encodeURIComponent(p.pedido || '');
+    const jr = await (await fetch(u, { headers: H })).json();
+    if (!jr.ok || !jr.mensagens || !jr.mensagens.length) { toast('Pasta criada. Email não encontrado para arquivar — usa 📥 na linha do pedido.', 'erro'); return; }
+    if (jr.mensagens.length > 1) { toast('Pasta criada. Há vários emails deste remetente — escolhe qual arquivar.'); novosFechar(); return arquivarEmail(pid); }
+    const msg = jr.mensagens[0];
+
+    const base = await gResolverUrl(p.sharepoint_url);
+    const driveId = base.parentReference && base.parentReference.driveId;
+    if (!driveId || !base.id) throw new Error('não consegui abrir a pasta no SharePoint');
+    const filhos = await gJson('/drives/' + driveId + '/items/' + base.id + '/children?$select=id,name,folder&$top=200');
+    let subs = (filhos.value || []).filter(f => f.folder).map(f => ({ id: f.id, nome: f.name }));
+    const garantir = async nome => {
+      let s = subs.find(x => norm(x.nome) === norm(nome));
+      if (s) return s;
+      const nova = await (await gFetch('/drives/' + driveId + '/items/' + base.id + '/children', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nome, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' })
+      })).json();
+      s = { id: nova.id, nome }; subs.push(s); return s;
+    };
+    const fEmails = await garantir('Emails');
+    const fOrc = await garantir('Orçamentos');
+    const fPecas = await garantir('Peças Desenhadas');
+
+    let okEml = false, nAnexos = 0; const erros = [];
+    try {
+      const r = await fetch(FN_EMAIL + '?acao=eml&id=' + encodeURIComponent(msg.id), { headers: H });
+      if (!r.ok) throw new Error('falha ao obter o .eml');
+      await spUploadBytes(driveId, fEmails.id, ((msg.assunto || 'email').trim().slice(0, 80)) + '.eml', await r.arrayBuffer());
+      okEml = true;
+    } catch (e) { erros.push('Email: ' + e.message); }
+
+    const ja = await (await fetch(FN_EMAIL + '?acao=anexos&id=' + encodeURIComponent(msg.id), { headers: H })).json();
+    for (const a of ((ja.ok ? ja.anexos : []) || [])) {
+      if (a.inline) continue;
+      const dest = /\.(pdf|dwg|dwf)$/i.test(a.nome || '') ? fPecas.id : fOrc.id;
+      try {
+        const r = await fetch(FN_EMAIL + '?acao=anexo&id=' + encodeURIComponent(msg.id) + '&anexo=' + encodeURIComponent(a.id), { headers: H });
+        if (!r.ok) throw new Error('falha ao obter');
+        await spUploadBytes(driveId, dest, a.nome, await r.arrayBuffer());
+        nAnexos++;
+      } catch (e) { erros.push(a.nome + ': ' + e.message); }
+    }
+    if (erros.length) toast('Pasta criada. Arquivado com avisos: ' + erros.join(' · '), 'erro');
+    else toast('✓ Pasta criada e email arquivado' + (nAnexos ? ' (' + nAnexos + ' anexo' + (nAnexos !== 1 ? 's' : '') + ')' : ''));
+  } catch (e) {
+    toast('Pasta criada, mas o arquivamento automático falhou. Abro o painel guiado…', 'erro');
+    novosFechar();
+    arquivarEmail(pid);
+  }
 }
 async function marcarForaNovo(pid){
   await mudarEstadoPedido(pid, 'Fora de Zona');
