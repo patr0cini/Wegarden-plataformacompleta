@@ -853,7 +853,7 @@ const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
-const BUILD = '2026-07-29d'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-29e'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -3351,7 +3351,8 @@ async function guardarOrcamento(silencioso){
   if (!h.nome_obra) { if (!silencioso) toast('Indica o nome da obra.', 'erro'); return; }
   numerarLinhas();
   const total = calcTotal();
-  if (h.estado === 'Enviado' && !h.data_envio) h.data_envio = new Date().toISOString();
+  const envioNovo = (h.estado === 'Enviado' && !h.data_envio);   // 1ª vez que fica «Enviado»
+  if (envioNovo) h.data_envio = new Date().toISOString();
 
   const corpo = {
     id: h.id, pedido_id: h.pedido_id || null, nome_obra: h.nome_obra,
@@ -3392,6 +3393,7 @@ async function guardarOrcamento(silencioso){
     $('hId').readOnly = true;
     $('hId').style.background = 'var(--cal)';
     if (!silencioso) toast('Orçamento guardado — ' + fmtEur(total));
+    if (envioNovo) await criarFollowupEnvio(h.id, h.nome_obra);   // Fase 3: prazo + follow-up automáticos
     carregarOrcamentos();
   } catch (e) { toast('Erro ao guardar: ' + e.message, 'erro'); }
 }
@@ -4556,6 +4558,37 @@ async function notificarLembrete(ini, lemb, codigo, obra){
     const j = await r.json();
     return !!j.enviado;
   } catch (e) { console.warn('notificar:', e.message); return false; }
+}
+
+/* ============================================================
+   Fase 3 — prazo + follow-up automáticos ao enviar o orçamento
+   Ao gravar um orçamento como «Enviado» (1ª vez), agenda um lembrete de
+   follow-up DIAS_FOLLOWUP dias depois, atribuído ao utilizador Microsoft
+   atual (se estiver na equipa) e notificado por email. Grava só a coluna
+   lembretes (PATCH isolado, preserva os existentes) e não duplica.
+   ============================================================ */
+const DIAS_FOLLOWUP = 7;
+async function criarFollowupEnvio(id, nomeObra){
+  if (!id) return;
+  try {
+    const rows = await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(id) + '&select=lembretes') || [];
+    const lembs = Array.isArray(rows[0] && rows[0].lembretes) ? rows[0].lembretes.slice() : [];
+    if (lembs.some(l => l && l.auto === 'envio')) return;   // já existe follow-up de envio
+    let ini = '', email = '';
+    if (spConta && spConta.username) {
+      const p = equipa.find(x => x.email && norm(x.email) === norm(spConta.username));
+      if (p) { ini = p.iniciais; email = p.email; }
+    }
+    const d = new Date(); d.setDate(d.getDate() + DIAS_FOLLOWUP);
+    const lemb = { data: d.toISOString().slice(0, 10), texto: 'Follow-up do orçamento enviado' + (nomeObra ? ' — ' + nomeObra : ''), done: false, resp: ini, resp_email: email, auto: 'envio' };
+    lembs.push(lemb);
+    await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(id), {
+      method: 'PATCH', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify({ lembretes: lembs })
+    });
+    if (ini) notificarLembrete(ini, lemb, id, nomeObra || '').catch(() => {});
+    toast('✉️ Follow-up agendado para ' + lemb.data + (ini ? ' · ' + ini : ' — atribui um responsável no quadro de follow-ups'));
+    if (typeof fuAtualizarBadge === 'function') fuAtualizarBadge();
+  } catch (e) { console.warn('followup envio:', e.message); }
 }
 
 function fuItens(){
