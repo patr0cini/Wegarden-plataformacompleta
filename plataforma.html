@@ -853,7 +853,7 @@ const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
-const BUILD = '2026-07-29f'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-29g'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -4394,10 +4394,22 @@ async function histGuardar(){
       // estado mudou para terminal → alinhar Progresso
       if (ESTADO_PARA_PROGRESSO[corpo.estado] && corpo.estado !== o.estado)
         corpo.progresso = ESTADO_PARA_PROGRESSO[corpo.estado];
+      // Fase 3: se o concurso mudou, reajustar a data do follow-up automático de envio
+      let lembsBase = Array.isArray(o.lembretes) ? o.lembretes.slice() : [];
+      const baseEnvio = corpo.data_envio || o.data_envio || null;
+      const auto = lembsBase.find(l => l && l.auto === 'envio' && !l.done);
+      if (auto && baseEnvio) {
+        const prF = prazoFollowup(corpo.concurso, baseEnvio);
+        if (auto.data !== prF.data) {
+          auto.data = prF.data;
+          auto.texto = 'Follow-up do orçamento enviado (' + prF.txt + ')' + (corpo.nome_obra ? ' — ' + corpo.nome_obra : '');
+          corpo.lembretes = lembsBase;
+        }
+      }
       if (novaNota) {
         const novaData = v('hNovaData');
         if (novaData) {
-          const lembs = (Array.isArray(o.lembretes) ? o.lembretes.slice() : []);
+          const lembs = Array.isArray(corpo.lembretes) ? corpo.lembretes : lembsBase;
           lembs.push(lembNovo(novaData));
           lembs.sort((a, b) => String(a.data).localeCompare(String(b.data)));
           corpo.lembretes = lembs;
@@ -4568,10 +4580,17 @@ async function notificarLembrete(ini, lemb, codigo, obra){
    lembretes (PATCH isolado, preserva os existentes) e não duplica.
    ============================================================ */
 const MESES_CONCURSO = 3, MESES_NORMAL = 1;   // prazo do follow-up: concurso (3 meses) vs. normal (1 mês)
+// calcula a data do follow-up a partir da base (envio) e da marca de concurso ('Sim'/'Não'/'')
+function prazoFollowup(concursoVal, baseISO){
+  const concurso = String(concursoVal || '').trim().toLowerCase() === 'sim';
+  const d = baseISO ? new Date(baseISO) : new Date();
+  d.setMonth(d.getMonth() + (concurso ? MESES_CONCURSO : MESES_NORMAL));
+  return { data: d.toISOString().slice(0, 10), concurso, txt: concurso ? '3 meses · concurso' : '1 mês' };
+}
 async function criarFollowupEnvio(id, nomeObra){
   if (!id) return;
   try {
-    const rows = await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(id) + '&select=lembretes') || [];
+    const rows = await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(id) + '&select=lembretes,concurso') || [];
     const lembs = Array.isArray(rows[0] && rows[0].lembretes) ? rows[0].lembretes.slice() : [];
     if (lembs.some(l => l && l.auto === 'envio')) return;   // já existe follow-up de envio
     let ini = '', email = '';
@@ -4579,10 +4598,11 @@ async function criarFollowupEnvio(id, nomeObra){
       const p = equipa.find(x => x.email && norm(x.email) === norm(spConta.username));
       if (p) { ini = p.iniciais; email = p.email; }
     }
-    const concurso = /concurso/.test(norm(nomeObra || ''));
-    const d = new Date(); d.setMonth(d.getMonth() + (concurso ? MESES_CONCURSO : MESES_NORMAL));
-    const prazoTxt = concurso ? '3 meses · concurso' : '1 mês';
-    const lemb = { data: d.toISOString().slice(0, 10), texto: 'Follow-up do orçamento enviado (' + prazoTxt + ')' + (nomeObra ? ' — ' + nomeObra : ''), done: false, resp: ini, resp_email: email, auto: 'envio' };
+    // concurso vem da marca manual do histórico (orcamentos_v2.concurso). Se ainda não estiver
+    // marcada ao enviar → «1 mês»; é reajustada quando marcares concurso no histórico.
+    const pr = prazoFollowup(rows[0] && rows[0].concurso, null);
+    const prazoTxt = pr.txt;
+    const lemb = { data: pr.data, texto: 'Follow-up do orçamento enviado (' + prazoTxt + ')' + (nomeObra ? ' — ' + nomeObra : ''), done: false, resp: ini, resp_email: email, auto: 'envio' };
     lembs.push(lemb);
     await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(id), {
       method: 'PATCH', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify({ lembretes: lembs })
