@@ -853,7 +853,7 @@ const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
-const BUILD = '2026-07-29g'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-29h'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -4312,14 +4312,14 @@ function abrirHistEdit(idx){
   const grau = comoAntigo ? (rr.grauOverride || '') : (rr.grau_override || '');
   const concurso = rr.concurso || '';
   const visita = rr.visita || '';
-  const valorEditavel = it.antigo || it.soSharePoint;
+  const valorEditavel = true;   // Valor sempre editável no histórico — o revisor pode corrigir o total revisto (ex.: alterado no SharePoint sem passar pela plataforma)
   const resps = [...new Set(orcamentos.map(o => o.responsavel).concat(historicoAntigo.map(h => h.responsavel)).filter(Boolean))].sort();
   $('histCorpoEdit').innerHTML =
     '<div class="hist-form">' +
       '<div class="full"><label>Obra</label><input id="heObra" value="' + esc(it.obra) + '"></div>' +
       '<div><label>Requerente</label><input id="hReq" value="' + esc(it.cliente) + '"></div>' +
       '<div><label>Responsável</label><input id="hResp" list="dlResp" value="' + esc(it.responsavel) + '"><datalist id="dlResp">' + resps.map(x => '<option>' + esc(x) + '</option>').join('') + '</datalist></div>' +
-      '<div><label>Valor (€)</label><input id="hValor" type="number" step="0.01" value="' + (it.total || '') + '"' + (valorEditavel ? '' : ' disabled title="Na Plataforma o total vem das linhas do orçamento"') + '></div>' +
+      '<div><label>Valor (€)</label><input id="hValor" type="number" step="0.01" value="' + (it.total || '') + '"' + (valorEditavel ? ' title="Podes corrigir aqui o total revisto (ex.: alterado no SharePoint). Nota: voltar a gravar o orçamento no editor recalcula-o a partir das linhas."' : ' disabled title="Na Plataforma o total vem das linhas do orçamento"') + '></div>' +
       estadoCampo +
       '<div><label>Concurso</label><select id="hConc">' + ['','Sim','Não'].map(v => '<option value="' + v + '"' + (concurso === v ? ' selected' : '') + '>' + (v || '—') + '</option>').join('') + '</select></div>' +
       '<div><label>Visita</label><select id="hVis">' + ['','Sim','Não'].map(v => '<option value="' + v + '"' + (visita === v ? ' selected' : '') + '>' + (v || '—') + '</option>').join('') + '</select></div>' +
@@ -4385,6 +4385,7 @@ async function histGuardar(){
         nome_obra: v('heObra').trim(), cliente: v('hReq').trim(),
         responsavel: v('hResp').trim() || null,
         estado: v('heEstado'),
+        total: (v('hValor') !== '' && !isNaN(parseFloat(v('hValor')))) ? parseFloat(v('hValor')) : (o.total != null ? o.total : null),
         concurso: v('hConc') || null, visita: v('hVis') || null,
         data_arranque: v('hArranque').trim() || null,
         grau_override: v('hGrau') || null,
