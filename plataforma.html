@@ -853,7 +853,7 @@ const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
-const BUILD = '2026-07-29j'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-29k'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -4248,6 +4248,12 @@ function selProgressoHist(idx, it){
 async function histProgresso(idx, valor){
   const it = histLista[idx];
   if (!it) return;
+  if (valor === 'Verificar' || valor === 'Corrigir') { abrirAtribuicao(idx, valor); return; }
+  await gravarProgresso(idx, valor, null);
+}
+async function gravarProgresso(idx, valor, lemb){
+  const it = histLista[idx];
+  if (!it) return;
   try {
     if (it.soSharePoint) {
       // pasta sem registo → criar o registo 2026 na tabela historico (mesmo padrão
@@ -4260,7 +4266,7 @@ async function histProgresso(idx, valor){
         adjudicado: valor === 'Adjudicado' ? 'Sim' : (valor === 'Não Adjudicado' ? 'Não' : ''),
         data_arranque: '', email_envio: '', data_envio: '', grau_override: '',
         progresso: valor,
-        notas: '', notas_hist: [], lembretes: []
+        notas: '', notas_hist: [], lembretes: lemb ? [lemb] : []
       };
       await db(NOVO, 'historico', { method: 'POST', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify(corpo) });
       toast('Registo criado para ' + it.codigo + ' — progresso: ' + valor);
@@ -4273,8 +4279,10 @@ async function histProgresso(idx, valor){
       if (valor === 'Adjudicado') corpo.adjudicado = 'Sim';
       else if (valor === 'Não Adjudicado') corpo.adjudicado = 'Não';
       else if (valor === 'Enviado') corpo.adjudicado = '';  // enviado, sem decisão → estado deriva a «Enviado»
+      if (lemb) corpo.lembretes = (it.raw && Array.isArray(it.raw.lembretes) ? it.raw.lembretes : []).concat([lemb]);
       await db(NOVO, 'historico?id=eq.' + encodeURIComponent(it.idOrig), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify(corpo) });
       it.progresso = valor;
+      if (lemb && it.raw) it.raw.lembretes = corpo.lembretes;
       if (corpo.adjudicado !== undefined) {
         it.estado = corpo.adjudicado === 'Sim' ? 'Adjudicado' : (corpo.adjudicado === 'Não' ? 'Perdido' : 'Enviado');
         if (it.raw) it.raw.adjudicado = corpo.adjudicado;
@@ -4282,11 +4290,12 @@ async function histProgresso(idx, valor){
     } else {
       const o = orcamentos.find(x => x.id === it.codigo);
       const corpo = { progresso: valor, atualizado_em: new Date().toISOString() };
+      if (lemb) corpo.lembretes = (o && Array.isArray(o.lembretes) ? o.lembretes : []).concat([lemb]);
       if (valor === 'Adjudicado') corpo.estado = 'Adjudicado';
       else if (valor === 'Não Adjudicado') corpo.estado = 'Perdido';
       else if (valor === 'Enviado') { corpo.estado = 'Enviado'; if (!o || !o.data_envio) corpo.data_envio = new Date().toISOString(); }
       await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(it.codigo), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify(corpo) });
-      if (o) { o.progresso = valor; if (corpo.estado) o.estado = corpo.estado; if (corpo.data_envio) o.data_envio = corpo.data_envio; }
+      if (o) { o.progresso = valor; if (corpo.estado) o.estado = corpo.estado; if (corpo.data_envio) o.data_envio = corpo.data_envio; if (lemb) o.lembretes = corpo.lembretes; }
       it.progresso = valor;
       if (corpo.estado) it.estado = corpo.estado;
     }
@@ -4296,6 +4305,39 @@ async function histProgresso(idx, valor){
       : 'Progresso actualizado: ' + valor);
     renderHistorico();
   } catch (e) { toast('Erro ao gravar progresso: ' + e.message, 'erro'); renderHistorico(); }
+}
+
+/* Progresso «Verificar»/«Corrigir» → atribuir a alguém (lembrete + email). */
+function abrirAtribuicao(idx, valor){
+  const it = histLista[idx]; if (!it) return;
+  if (!equipa.length) { toast('A equipa ainda não carregou — tenta daqui a instantes.'); renderHistorico(); return; }
+  const acao = valor === 'Verificar' ? 'verificação' : 'correção';
+  $('emTitulo').textContent = (valor === 'Verificar' ? '🔍 Atribuir verificação' : '✏️ Atribuir correção') + ' — ' + it.codigo;
+  $('emCorpo').innerHTML =
+    '<div style="margin-bottom:10px;font-size:12.5px;color:var(--cinza)">Escolhe quem fica com a ' + acao + ' de <b>' + esc(it.obra || it.codigo) + '</b>. A pessoa recebe um email e o lembrete aparece nos follow-ups dela.</div>' +
+    '<div style="display:flex;flex-direction:column;gap:6px">' +
+    equipa.map(p => '<button class="pm-item" style="text-align:left;border:1px solid var(--linha);border-radius:8px;padding:9px 12px;cursor:pointer;background:#fff" onclick="atribExecutar(' + idx + ',\'' + esc(valor) + '\',\'' + esc(p.iniciais) + '\')"><b>' + esc(p.iniciais) + '</b>' + (p.nome ? ' · ' + esc(p.nome) : '') + (p.email ? '' : ' <span style="color:var(--erro)">(sem email — não será notificado)</span>') + '</button>').join('') +
+    '</div>';
+  $('emAcoes').innerHTML =
+    '<button class="btn ghost" onclick="atribExecutar(' + idx + ',\'' + esc(valor) + '\',\'\')">Guardar sem atribuir</button>' +
+    '<button class="btn ghost" onclick="emFechar(); renderHistorico();">Cancelar</button>';
+  $('emailOverlay').classList.add('aberto');
+}
+async function atribExecutar(idx, valor, ini){
+  const it = histLista[idx]; if (!it) return;
+  emFechar();
+  let lemb = null, p = null;
+  if (ini) {
+    p = equipaDe(ini);
+    lemb = { data: new Date().toISOString().slice(0,10), texto: (valor === 'Verificar' ? '🔍 Verificar orçamento' : '✏️ Corrigir orçamento'), done: false, resp: ini, resp_email: (p && p.email) || '', auto: valor.toLowerCase() };
+  }
+  await gravarProgresso(idx, valor, lemb);
+  if (ini && p) {
+    const ok = await notificarLembrete(ini, lemb, it.codigo, it.obra);
+    toast(ok ? '✉️ ' + ini + ' foi notificado para ' + (valor === 'Verificar' ? 'verificar' : 'corrigir')
+      : (p && !p.email ? ini + ' não tem email na equipa — atribuído mas não notificado' : 'Atribuído a ' + ini + ' (falha no email)'),
+      ok ? undefined : 'erro');
+  }
 }
 
 /* Encontra o link da pasta SharePoint de um registo do histórico, cruzando
