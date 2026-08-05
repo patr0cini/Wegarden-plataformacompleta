@@ -853,7 +853,7 @@ const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
-const BUILD = '2026-07-29h'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-29i'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -1322,6 +1322,7 @@ function cardNovo(p, cod){
     '</div>' +
     '<div class="np-acoes">' +
       '<button class="btn mini primario" onclick="confirmarNovo(\'' + idJs + '\')">✓ Confirmar (pasta + arquivo)</button>' +
+      '<button class="btn mini ghost" onclick="associarNovo(\'' + idJs + '\')" title="Já existe pasta desta obra (ex.: concurso com vários pedidos) — associa e arquiva só o email nessa pasta">🔗 Associar a pasta existente</button>' +
       (p.estado !== 'Fora de Zona' ? '<button class="btn mini ghost" onclick="marcarForaNovo(\'' + idJs + '\')">🚫 Fora de zona</button>' : '') +
       '<button class="btn mini ghost" onclick="rejeitarNovo(\'' + idJs + '\')">✕ Rejeitar</button>' +
       '<button class="btn mini ghost" onclick="adiarNovo(\'' + idJs + '\')">Depois</button>' +
@@ -1442,11 +1443,21 @@ async function confirmarNovo(pid){
   removerCardNovo(pid);
   arquivarEmailAuto(pid);   // arquiva o email automaticamente (recua para o painel guiado se preciso)
 }
+// Associar a uma pasta/obra já existente (ex.: concurso — vários pedidos para a mesma obra).
+// Abre o seletor de pastas; ao escolher, liga à pasta, associa ao pedido principal e arquiva só o email.
+function associarNovo(pid){
+  const p = pedidos.find(x => String(x.id) === String(pid));
+  if (!p) return;
+  if (!pastasSharePoint.length) { toast('A listagem de pastas do SharePoint ainda não carregou — tenta daqui a instantes.', 'erro'); return; }
+  LIGAR_ASSOC_NOVO = true;
+  novosFechar();
+  ligarPastaPedido(pid);
+}
 
 // arquivamento 100% automático (sem UI). Destinos por defeito: .eml→Emails,
 // pdf/dwg/dwf→Peças Desenhadas, resto→Orçamentos; inline ignorados.
 // Recua para o painel guiado arquivarEmail(pid) se houver >1 email candidato ou erro.
-async function arquivarEmailAuto(pid){
+async function arquivarEmailAuto(pid, opts){
   const p = pedidos.find(x => String(x.id) === String(pid));
   if (!p || !p.sharepoint_url) return;
   const H = { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key };
@@ -1483,19 +1494,22 @@ async function arquivarEmailAuto(pid){
       okEml = true;
     } catch (e) { erros.push('Email: ' + e.message); }
 
-    const ja = await (await fetch(FN_EMAIL + '?acao=anexos&id=' + encodeURIComponent(msg.id), { headers: H })).json();
-    for (const a of ((ja.ok ? ja.anexos : []) || [])) {
-      if (a.inline) continue;
-      const dest = /\.(pdf|dwg|dwf)$/i.test(a.nome || '') ? fPecas.id : fOrc.id;
-      try {
-        const r = await fetch(FN_EMAIL + '?acao=anexo&id=' + encodeURIComponent(msg.id) + '&anexo=' + encodeURIComponent(a.id), { headers: H });
-        if (!r.ok) throw new Error('falha ao obter');
-        await spUploadBytes(driveId, dest, a.nome, await r.arrayBuffer());
-        nAnexos++;
-      } catch (e) { erros.push(a.nome + ': ' + e.message); }
+    if (!(opts && opts.soEmail)) {
+      const ja = await (await fetch(FN_EMAIL + '?acao=anexos&id=' + encodeURIComponent(msg.id), { headers: H })).json();
+      for (const a of ((ja.ok ? ja.anexos : []) || [])) {
+        if (a.inline) continue;
+        const dest = /\.(pdf|dwg|dwf)$/i.test(a.nome || '') ? fPecas.id : fOrc.id;
+        try {
+          const r = await fetch(FN_EMAIL + '?acao=anexo&id=' + encodeURIComponent(msg.id) + '&anexo=' + encodeURIComponent(a.id), { headers: H });
+          if (!r.ok) throw new Error('falha ao obter');
+          await spUploadBytes(driveId, dest, a.nome, await r.arrayBuffer());
+          nAnexos++;
+        } catch (e) { erros.push(a.nome + ': ' + e.message); }
+      }
     }
-    if (erros.length) toast('Pasta criada. Arquivado com avisos: ' + erros.join(' · '), 'erro');
-    else toast('✓ Pasta criada e email arquivado' + (nAnexos ? ' (' + nAnexos + ' anexo' + (nAnexos !== 1 ? 's' : '') + ')' : ''));
+    const pref = (opts && opts.soEmail) ? 'Email arquivado na pasta' : '✓ Pasta criada e email arquivado';
+    if (erros.length) toast(pref + ' com avisos: ' + erros.join(' · '), 'erro');
+    else toast(pref + (nAnexos ? ' (' + nAnexos + ' anexo' + (nAnexos !== 1 ? 's' : '') + ')' : ''));
   } catch (e) {
     toast('Pasta criada, mas o arquivamento automático falhou. Abro o painel guiado…', 'erro');
     novosFechar();
@@ -1526,6 +1540,7 @@ async function rejeitarNovo(pid){
    pastas2026 já carregada — não precisa de sessão Microsoft.
    ============================================================ */
 let LIGAR = null; // pedido a ligar
+let LIGAR_ASSOC_NOVO = false; // true quando «Associar a pasta existente» (pop-up) abriu o seletor
 
 function ligarPastaPedido(pid){
   const p = pedidos.find(x => String(x.id) === String(pid));
@@ -1568,20 +1583,33 @@ function ligarRender(){
 async function ligarEscolhida(i){
   const p = LIGAR, pp = pastasSharePoint[i];
   if (!p || !pp) return;
+  const modo = LIGAR_ASSOC_NOVO;
   const usada = pedidos.some(x => x.sharepoint_url && String(x.id) !== String(p.id) && codigoDaPasta(x.sharepoint_url) === pp.codigo);
-  if (usada && !confirm('A pasta ' + pp.codigo + ' já está ligada a outro pedido.\n\nLigar este pedido à MESMA pasta?')) return;
+  if (usada && !modo && !confirm('A pasta ' + pp.codigo + ' já está ligada a outro pedido.\n\nLigar este pedido à MESMA pasta?')) return;
   try {
     const corpo = { sharepoint_url: pp.webUrl };
     // promover o estado como a reconciliação faz — só se ainda não foi trabalhado
     if (!p.estado || p.estado === 'Não iniciado' || p.estado === 'Novo') corpo.estado = 'No SharePoint';
+    if (modo) {
+      // concurso: vários pedidos, uma obra → associa ao pedido principal da pasta
+      const principal = pedidos.find(x => x.sharepoint_url && String(x.id) !== String(p.id) && codigoDaPasta(x.sharepoint_url) === pp.codigo);
+      if (principal) corpo.associado_a = principal.associado_a || principal.id;
+    }
     await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(p.id), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify(corpo) });
     p.sharepoint_url = pp.webUrl;
     if (corpo.estado) p.estado = corpo.estado;
-    LIGAR = null;
+    if (corpo.associado_a) p.associado_a = corpo.associado_a;
+    LIGAR = null; LIGAR_ASSOC_NOVO = false;
     emFechar();
-    toast('Pedido ligado à pasta ' + pp.codigo + ' 📎');
+    if (modo) {
+      toast('Associado à pasta ' + pp.codigo + ' — a arquivar o email…');
+      await arquivarEmailAuto(p.id, { soEmail: true });
+      removerCardNovo(p.id);
+    } else {
+      toast('Pedido ligado à pasta ' + pp.codigo + ' 📎');
+    }
     renderPipeline();
-  } catch (e) { toast('Erro ao ligar: ' + e.message, 'erro'); }
+  } catch (e) { LIGAR_ASSOC_NOVO = false; toast('Erro ao ligar: ' + e.message, 'erro'); }
 }
 
 /* ============================================================
@@ -4071,7 +4099,7 @@ function renderHistorico(){
       '<td style="text-align:center">' + simNaoChip(it.concurso) + '</td>' +
       '<td style="text-align:center">' + simNaoChip(it.visita) + '</td>' +
       '<td title="' + esc(it.arranque || '') + '">' + esc((it.arranque || '—').length > 14 ? it.arranque.slice(0,13) + '…' : (it.arranque || '—')) + '</td>' +
-      '<td title="' + esc(it.cliente) + '">' + esc(it.cliente.length > 18 ? it.cliente.slice(0,17) + '…' : (it.cliente || '—')) + '</td>' +
+      '<td title="' + esc((it.cliente || '').replace(/\n+/g, ', ')) + '">' + (function(c){ c = (c || '').replace(/\n+/g, ', '); return esc(c.length > 18 ? c.slice(0,17) + '…' : (c || '—')); })(it.cliente) + '</td>' +
       '<td style="text-align:center">' + (it.responsavel ? '<span class="resp-pill">' + esc(it.responsavel) + '</span>' : '<span style="color:var(--cinza)">—</span>') + '</td>' +
       '<td style="text-align:center">' + (nFu ? '<span class="b-nota">' + nFu + '</span>' : '<span style="color:var(--cinza);font-size:11px">—</span>') + '</td>' +
       '<td style="text-align:center" onclick="event.stopPropagation()">' + iconeEliminar + '</td>' +
@@ -4317,7 +4345,7 @@ function abrirHistEdit(idx){
   $('histCorpoEdit').innerHTML =
     '<div class="hist-form">' +
       '<div class="full"><label>Obra</label><input id="heObra" value="' + esc(it.obra) + '"></div>' +
-      '<div><label>Requerente</label><input id="hReq" value="' + esc(it.cliente) + '"></div>' +
+      '<div class="full"><label>Requerente <span style="text-transform:none;letter-spacing:0;font-weight:400">(concurso? um por linha)</span></label><textarea id="hReq" rows="2" style="resize:vertical;width:100%">' + esc(it.cliente) + '</textarea></div>' +
       '<div><label>Responsável</label><input id="hResp" list="dlResp" value="' + esc(it.responsavel) + '"><datalist id="dlResp">' + resps.map(x => '<option>' + esc(x) + '</option>').join('') + '</datalist></div>' +
       '<div><label>Valor (€)</label><input id="hValor" type="number" step="0.01" value="' + (it.total || '') + '"' + (valorEditavel ? ' title="Podes corrigir aqui o total revisto (ex.: alterado no SharePoint). Nota: voltar a gravar o orçamento no editor recalcula-o a partir das linhas."' : ' disabled title="Na Plataforma o total vem das linhas do orçamento"') + '></div>' +
       estadoCampo +
