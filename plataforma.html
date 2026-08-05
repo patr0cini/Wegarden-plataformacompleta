@@ -853,7 +853,7 @@ const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
-const BUILD = '2026-07-29i'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-29j'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -3929,9 +3929,9 @@ async function carregarHistoricoAntigo(){
    histórico do follow-up aparecer também quando se abre a obra. */
 function lembretesParaFollowups(lembs){
   return (Array.isArray(lembs) ? lembs : []).flatMap(l => {
-    const principal = { data: l.data, nota: 'Lembrete: ' + (l.texto || '') + (l.done ? ' ✓' : '') };
+    const principal = { data: l.data, nota: 'Lembrete: ' + (l.texto || '') + (l.done ? ' ✓' : ''), tipo: 'lembrete' };
     const notasInternas = (Array.isArray(l.notas) ? l.notas : []).map(n => ({
-      data: n.at, nota: '↳ ' + (n.texto || '')
+      data: n.at, nota: '↳ ' + (n.texto || ''), tipo: 'lembrete'
     }));
     return [principal].concat(notasInternas);
   });
@@ -3943,8 +3943,8 @@ function normalizarAntigo(fonte, rec){
   const adj = norm(rec.adjudicado);
   const estado = adj === 'sim' ? 'Adjudicado' : (adj === 'nao' ? 'Perdido' : 'Enviado');
   const followups = []
-    .concat(rec.notas ? [{ data:null, nota: rec.notas }] : [])
-    .concat((rec.notasHist || []).map(n => ({ data: n.at, nota: n.texto })))
+    .concat(rec.notas ? [{ data:null, nota: rec.notas, tipo:'nota' }] : [])
+    .concat((rec.notasHist || []).map(n => ({ data: n.at, nota: n.texto, autor: n.autor || '', tipo:'nota' })))
     .concat(lembretesParaFollowups(rec.lembretes));
   return {
     fonte,
@@ -4001,7 +4001,7 @@ function renderHistorico(){
       sortKey: o.data_envio || o.atualizado_em || '',
       sortTs: Date.parse(o.data_envio || o.atualizado_em) || 0,
       estado:o.estado,
-      followups: (Array.isArray(o.followups) ? o.followups : [])
+      followups: (Array.isArray(o.followups) ? o.followups.map(f => ({ data: f.data, nota: f.nota, autor: f.autor || '', tipo: 'nota' })) : [])
         .concat(lembretesParaFollowups(o.lembretes)),
       grauData: { valor: Number(o.total) || 0, concurso: o.concurso, dataArranque: o.data_arranque, override: o.grau_override || '' },
       antigo:false, raw:o
@@ -4324,7 +4324,7 @@ function abrirHistEdit(idx){
   const r = it.raw;
   const fus = it.followups.length
     ? '<div class="full"><label>Follow-ups e notas registadas</label><ul class="followups" style="margin:0">' +
-      it.followups.map(f => '<li>' + (f.data ? '<b>' + esc(fmtData(f.data)) + '</b> — ' : '') + esc(f.nota) + '</li>').join('') + '</ul></div>'
+      it.followups.map(f => '<li>' + (f.tipo === 'nota' ? '📝 ' : '⏰ ') + (f.data ? '<b>' + esc(fmtData(f.data)) + '</b> — ' : '') + esc(f.nota) + (f.tipo === 'nota' && f.autor ? ' <span style="color:var(--cinza)">· ' + esc(f.autor) + '</span>' : '') + '</li>').join('') + '</ul></div>'
     : '';
   // "No SharePoint" comporta-se como o histórico antigo: campos editáveis, valor editável.
   // Ao gravar, é criado um registo no histórico 2026 e deixa de ser virtual.
@@ -4355,9 +4355,10 @@ function abrirHistEdit(idx){
       '<div><label>Arranque previsto</label><input id="hArranque" placeholder="ex.: Julho 2026" value="' + esc(arranque) + '"></div>' +
       '<div><label>Grau de interesse</label><select id="hGrau">' + ['','Baixo','Médio','Alto','Muito Alto'].map(v => '<option value="' + v + '"' + (grau === v ? ' selected' : '') + '>' + (v || '— automático —') + '</option>').join('') + '</select></div>' +
       fus +
-      '<div class="full"><label>Nova nota de follow-up <span style="text-transform:none;letter-spacing:0;font-weight:400">(com data → lembrete agendado)</span></label>' +
-      '<div style="display:flex;gap:8px"><input id="hNovaNota" style="flex:1" placeholder="ex.: Ligar para saber a decisão"><input id="hNovaData" type="date" style="width:150px">' +
-      '<select id="hNovaResp" style="width:170px" title="Com data + responsável → a pessoa recebe email">' + opcoesEquipa('') + '</select></div></div>' +
+      '<div class="full"><label>⏰ Novo follow-up <span style="text-transform:none;letter-spacing:0;font-weight:400">(a fazer — agenda lembrete e avisa a pessoa por email)</span></label>' +
+      '<div style="display:flex;gap:8px"><input id="hNovaNota" style="flex:1" placeholder="ex.: Ligar ao cliente para saber a decisão"><input id="hNovaData" type="date" style="width:150px" title="Quando fazer (obrigatório para o follow-up)"><select id="hNovaResp" style="width:170px" title="Quem faz — recebe email">' + opcoesEquipa('') + '</select></div></div>' +
+      '<div class="full"><label>📝 Nova nota de histórico <span style="text-transform:none;letter-spacing:0;font-weight:400">(já feito — só regista, sem lembrete; fica com o teu nome e a data)</span></label>' +
+      '<input id="hNotaHist" style="width:100%" placeholder="ex.: Enviado orçamento revisto ao cliente"></div>' +
     '</div>';
   $('histOverlay').classList.add('aberto');
 }
@@ -4368,7 +4369,12 @@ async function histGuardar(){
   const it = histLista[histEditIdx]; if (!it) return;
   const v = id => ($(id) ? $(id).value : '');
   const novaNota = v('hNovaNota').trim();
-  // responsável do novo lembrete (só se houver data — sem data é nota, não lembrete)
+  const notaHist = v('hNotaHist').trim();          // nota de histórico (já feito) — não cria lembrete
+  const autorNota = (spConta && (spConta.name || spConta.username)) || '';
+  // textos que viram NOTA de histórico (autor + data de registo): a nota dedicada +
+  // um follow-up escrito sem data (para não perder o que foi escrito)
+  const textosNota = [notaHist, (novaNota && !v('hNovaData')) ? novaNota : ''].filter(Boolean);
+  // responsável do novo lembrete (só com data + responsável → email)
   const novoResp = v('hNovaResp');
   const novoRespP = novoResp ? equipaDe(novoResp) : null;
   const lembNovo = d => ({ data: d, texto: novaNota, done: false, resp: novoResp || '', resp_email: novoRespP ? (novoRespP.email || '') : '' });
@@ -4393,11 +4399,8 @@ async function histGuardar(){
         dataEnvio: v('hDataEnvio'), grauOverride: v('hGrau')
       };
       novo.progresso = novo.adjudicado === 'Sim' ? 'Adjudicado' : (novo.adjudicado === 'Não' ? 'Não Adjudicado' : '');
-      if (novaNota) {
-        const novaData = v('hNovaData');
-        if (novaData) novo.lembretes = [lembNovo(novaData)];
-        else novo.notasHist = [{ at: new Date().toISOString(), texto: novaNota }];
-      }
+      if (novaNota && v('hNovaData')) novo.lembretes = [lembNovo(v('hNovaData'))];
+      if (textosNota.length) novo.notasHist = textosNota.map(t => ({ at: new Date().toISOString(), texto: t, autor: autorNota }));
       toast('A criar orçamento no histórico 2026… o servidor pode demorar a acordar');
       const criado = await histCriarNovo2026(novo);
       historicoAntigo.push(normalizarAntigo('2026', criado));
@@ -4435,18 +4438,17 @@ async function histGuardar(){
           corpo.lembretes = lembsBase;
         }
       }
-      if (novaNota) {
-        const novaData = v('hNovaData');
-        if (novaData) {
-          const lembs = Array.isArray(corpo.lembretes) ? corpo.lembretes : lembsBase;
-          lembs.push(lembNovo(novaData));
-          lembs.sort((a, b) => String(a.data).localeCompare(String(b.data)));
-          corpo.lembretes = lembs;
-        } else {
-          const fus = Array.isArray(o.followups) ? o.followups.slice() : [];
-          fus.push({ data: new Date().toISOString().slice(0,10), nota: novaNota });
-          corpo.followups = fus;
-        }
+      if (novaNota && v('hNovaData')) {
+        const lembs = Array.isArray(corpo.lembretes) ? corpo.lembretes : lembsBase;
+        lembs.push(lembNovo(v('hNovaData')));
+        lembs.sort((a, b) => String(a.data).localeCompare(String(b.data)));
+        corpo.lembretes = lembs;
+      }
+      if (textosNota.length) {
+        const fus = Array.isArray(o.followups) ? o.followups.slice() : [];
+        const hojeN = new Date().toISOString().slice(0,10);
+        for (const t of textosNota) fus.push({ data: hojeN, nota: t, autor: autorNota });
+        corpo.followups = fus;
       }
       await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(o.id), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify(corpo) });
       toast('Guardado na Plataforma');
@@ -4470,14 +4472,12 @@ async function histGuardar(){
       // adjudicado mudou → alinhar Progresso (Sim→Adjudicado, Não→Não Adjudicado, vazio→Enviado)
       if (mud.adjudicado !== (it.raw.adjudicado || ''))
         mud.progresso = mud.adjudicado === 'Sim' ? 'Adjudicado' : (mud.adjudicado === 'Não' ? 'Não Adjudicado' : 'Enviado');
-      if (novaNota) {
-        const novaData = v('hNovaData');
-        if (novaData) {
-          mud.lembretes = (it.raw.lembretes || []).concat([lembNovo(novaData)])
-            .sort((a, b) => String(a.data).localeCompare(String(b.data)));
-        } else {
-          mud.notasHist = (it.raw.notasHist || []).concat([{ at: new Date().toISOString(), texto: novaNota }]);
-        }
+      if (novaNota && v('hNovaData')) {
+        mud.lembretes = (it.raw.lembretes || []).concat([lembNovo(v('hNovaData'))])
+          .sort((a, b) => String(a.data).localeCompare(String(b.data)));
+      }
+      if (textosNota.length) {
+        mud.notasHist = (it.raw.notasHist || []).concat(textosNota.map(t => ({ at: new Date().toISOString(), texto: t, autor: autorNota })));
       }
       toast('A gravar em ' + it.fonte + '… o servidor pode demorar a acordar');
       const atualizado = await histGravarAntigo(it.fonte, it.idOrig, mud);
