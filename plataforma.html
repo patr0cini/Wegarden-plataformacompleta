@@ -522,7 +522,9 @@ th .si{opacity:.45;font-size:10px}
         <button class="btn ghost mini" onclick="matchAutomatico()" title="Percorrer os artigos sem preço e sugerir correspondências da tabela, uma a uma">⚡ Match manual</button>
         <button class="btn ghost mini" onclick="document.getElementById('importFile').click()" title="Importar mapa de quantidades do computador">⬆ Importar do computador</button>
         <button class="btn ghost mini" onclick="spAbrir()" title="Abrir mapa de quantidades a partir do SharePoint">☁ Importar do SharePoint</button>
+        <button class="btn ghost mini" onclick="document.getElementById('importPdf').click()" title="Extrair artigos, quantidades e unidades de uma proposta em PDF (fornecedor Landlab). Os preços ficam por atribuir.">📄 Importar de PDF</button>
         <input type="file" id="importFile" accept=".xlsx,.xls,.xlsm" style="display:none" onchange="importarExcel(this.files[0]); this.value=''">
+        <input type="file" id="importPdf" accept=".pdf,application/pdf" style="display:none" onchange="importarPdf(this.files[0]); this.value=''">
       </div>
 
       <div class="tabela-wrap">
@@ -853,7 +855,7 @@ const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
-const BUILD = '2026-07-29k'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-29l'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -3762,6 +3764,74 @@ function importarDoBuffer(wb, folha, hi, ci, preservar){
     const semPreco = atual.linhas.filter(l=>l.tipo==='artigo'&&!(l.preco_unitario>0)).length;
     toast('Importadas '+novas.length+' linhas'+(semPreco?' · '+semPreco+' artigos sem preço — usa ⚡ Match automático':''));
   } catch(e){ toast('Erro ao importar: '+e.message, 'erro'); }
+}
+
+/* ============================================================
+   Importar proposta em PDF (fornecedor Landlab) — extrai artigos,
+   quantidades e unidades para o orçamento; os preços ficam por atribuir.
+   Usa o pdf.js (carregado on-demand de CDN). Reconstrói as linhas por
+   coordenada e faz o parse do formato Landlab
+   (pos · artigo · descrição · qtd · un · preço · iva · total).
+   ============================================================ */
+let _pdfjs = null;
+async function carregarPdfJs(){
+  if (_pdfjs) return _pdfjs;
+  const V = '4.6.82';
+  const lib = await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@' + V + '/build/pdf.min.mjs');
+  lib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + V + '/build/pdf.worker.min.mjs';
+  return _pdfjs = lib;
+}
+async function linhasDoPdf(buf){
+  const pdfjs = await carregarPdfJs();
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
+  const out = [];
+  for (let p = 1; p <= pdf.numPages; p++){
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    const porY = {};
+    for (const it of tc.items){ if (!it.str) continue; const y = Math.round(it.transform[5]); (porY[y] = porY[y] || []).push({ x: it.transform[4], s: it.str }); }
+    for (const y of Object.keys(porY).map(Number).sort((a,b)=>b-a)){
+      const t = porY[y].sort((a,b)=>a.x-b.x).map(o=>o.s).join(' ').replace(/\s+/g,' ').trim();
+      if (t) out.push(t);
+    }
+  }
+  return out;
+}
+const RE_ITEM_PDF = /^(\d{1,3})\s+(\S+)\s+(.+?)\s+(\d[\d.]*,\d{2})\s+([A-Za-zºª²³0-9]{1,5})\s+\d[\d.]*,\d{2}\s+\d[\d.]*,\d{2}\s+\d[\d.]*,\d{2}\s*$/;
+function parsePropostaPdf(linhas){
+  let ini = -1, fim = linhas.length;
+  linhas.forEach((t,i)=>{ if (ini < 0 && /^Pos\.?\s+Artigo/i.test(t)) ini = i + 1; });
+  if (ini < 0) return [];
+  for (let i = ini; i < linhas.length; i++){ if (/Dada a instabilidade|Processado por Computador|Local de descarga/i.test(linhas[i])){ fim = i; break; } }
+  const res = []; let ult = null;
+  for (let i = ini; i < fim; i++){
+    const t = linhas[i];
+    const m = t.match(RE_ITEM_PDF);
+    if (m){ const a = { tipo:'artigo', codigo:null, descricao:m[3].trim(), unidade:m[5].toLowerCase(), quantidade:numPT(m[4]), preco_unitario:0 }; res.push(a); ult = a; continue; }
+    if (/^Sistema\b/i.test(t)){ res.push({ tipo:'subcapitulo', codigo:null, descricao:t, unidade:'', quantidade:0, preco_unitario:0 }); ult = null; continue; }
+    if (ult) ult.descricao = (ult.descricao + ' ' + t).replace(/\s+/g,' ').trim();
+  }
+  return res;
+}
+async function importarPdf(file){
+  if (!file) return;
+  if (!atual) { toast('Abre ou cria um orçamento primeiro.', 'erro'); return; }
+  toast('A ler o PDF…');
+  try {
+    const novas = parsePropostaPdf(await linhasDoPdf(await file.arrayBuffer()));
+    const nArt = novas.filter(x => x.tipo === 'artigo').length;
+    if (!nArt) { toast('Não reconheci artigos neste PDF (formato esperado: proposta Landlab).', 'erro'); return; }
+    if (atual.linhas.length){
+      if (confirm(nArt + ' artigo(s) encontrados no PDF.\n\nOK = substituir as linhas atuais · Cancelar = acrescentar no fim'))
+        atual.linhas = novas;
+      else atual.linhas = atual.linhas.concat(novas);
+    } else {
+      atual.linhas = novas;
+    }
+    marcarSujo();
+    renderLinhas();
+    toast('✓ ' + nArt + ' artigo(s) importados do PDF — atribui os preços (⚡ Auto ≥90% ou Match manual).');
+  } catch (e) { toast('Erro ao ler o PDF: ' + (e.message || e), 'erro'); }
 }
 
 /* Gera o Excel preenchendo o ficheiro ORIGINAL (mantém formato, cores, fórmulas) */
