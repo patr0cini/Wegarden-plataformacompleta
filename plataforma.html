@@ -855,7 +855,7 @@ const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
-const BUILD = '2026-07-29l'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-29m'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -3448,46 +3448,68 @@ async function gerarExcelBuffer(){
   const h = atual.header;
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Budget');
-  ws.columns = [{width:12.16},{width:23},{width:14.5},{width:13.5},{width:12.33},{width:14.33}];
-  const treb = (extra) => ({ name:'Trebuchet MS', size:11, ...(extra||{}) });
+  // template WeGarden: coluna A = margem estreita; dados em B..G
+  ws.columns = [{width:2.9},{width:12.1},{width:69.1},{width:14.4},{width:13.4},{width:12.3},{width:14.3}];
+  const VERDE = 'FF4A7C29', ESCURO = 'FF455F51', FUNDO = 'FFAEC4B8';
+  const FMT_EUR = '_-[$€-2]\\ * #,##0.00_-;\\-[$€-2]\\ * #,##0.00_-;_-[$€-2]\\ * "-"??_-;_-@_-';
+  const treb = (extra) => ({ name:'Trebuchet MS', size:11, color:{ argb:ESCURO }, ...(extra||{}) });
+  const alinhar = (h) => ({ horizontal:h, vertical:'middle' });
+  const trac = { top:{style:'dashed'}, bottom:{style:'dashed'}, left:{style:'dashed'}, right:{style:'dashed'} };
 
-  ws.getRow(1).height = 30;
-  ws.getCell('B1').value = 'WeGarden';
-  ws.getCell('B1').font = { name:'Garamond', size:15 };
+  // cabeçalho / título (com merges como no template; F1:G2 reservado ao logótipo)
+  ws.mergeCells('B1:E1'); ws.mergeCells('B2:E2'); ws.mergeCells('F1:G2');
+  ws.getRow(1).height = 34.5;
+  ws.getCell('B1').value = 'We Garden';
+  ws.getCell('B1').font = { name:'Garamond', size:15, color:{ argb:VERDE } };
+  ws.getCell('B1').alignment = alinhar('left');
 
-  ws.getRow(2).height = 37.5;
+  ws.getRow(2).height = 46.5;
   ws.getCell('B2').value = h.nome_obra || 'Nome Obra';
-  ws.getCell('B2').font = { name:'Trebuchet MS', size:20, bold:true };
+  ws.getCell('B2').font = { name:'Trebuchet MS', size:20, bold:true, color:{ argb:ESCURO } };
+  ws.getCell('B2').alignment = alinhar('center');
 
   ws.getRow(3).height = 21.75;
-  const cab = ['Artigo','Descrição','Quantidade','Unidade','Preço Un.','Preço Total'];
-  cab.forEach((t, i) => {
-    const c = ws.getCell(3, i + 1);
+  ['Artigo','Descrição','Quantidade','Unidade','Preço Un.','Preço Total'].forEach((t, i) => {
+    const c = ws.getCell(3, i + 2);   // B..G
     c.value = t;
-    c.font = treb(i === 0 ? { bold:true } : null);
+    c.font = { name:'Trebuchet MS', size:11, bold:true, color:{ argb:VERDE } };
   });
 
   let r = 4;
   const primeira = r;
   for (const l of atual.linhas) {
     ws.getRow(r).height = 30;
-    ws.getCell(r,1).value = l.num;            ws.getCell(r,1).font = treb();
-    ws.getCell(r,2).value = l.descricao||''; ws.getCell(r,2).font = treb();
-    if (l.tipo === 'artigo') {
-      ws.getCell(r,3).value = l.quantidade || 0;       ws.getCell(r,3).font = treb(); ws.getCell(r,3).numFmt = '#,##0.00';
-      ws.getCell(r,4).value = l.unidade || '';         ws.getCell(r,4).font = treb();
-      ws.getCell(r,5).value = l.preco_unitario || 0;   ws.getCell(r,5).font = treb(); ws.getCell(r,5).numFmt = '#,##0.00 "€"';
-      ws.getCell(r,6).value = { formula: 'C' + r + '*E' + r }; ws.getCell(r,6).font = treb(); ws.getCell(r,6).numFmt = '#,##0.00 "€"';
+    const cNum = ws.getCell(r,2), cDesc = ws.getCell(r,3);
+    cNum.value = l.num || '';
+    cDesc.value = l.descricao || '';
+    if (l.tipo !== 'artigo') {
+      // capítulo / subcapítulo — faixa verde-clara + negrito em toda a linha (B..G)
+      for (let col = 2; col <= 7; col++) {
+        const c = ws.getCell(r, col);
+        c.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:FUNDO } };
+        c.font = { name:'Trebuchet MS', size:11, bold:true, color:{ argb:ESCURO } };
+        c.alignment = alinhar('left');
+      }
+    } else {
+      cNum.font = treb();  cNum.border = trac;  cNum.alignment = alinhar('left');
+      cDesc.font = treb(); cDesc.border = trac; cDesc.alignment = alinhar('left');
+      const cQ = ws.getCell(r,4), cU = ws.getCell(r,5), cP = ws.getCell(r,6), cT = ws.getCell(r,7);
+      cQ.value = l.quantidade || 0; cQ.font = treb(); cQ.alignment = alinhar('center'); cQ.border = trac;
+      cU.value = l.unidade || '';   cU.font = treb(); cU.alignment = alinhar('center'); cU.border = trac;
+      cP.value = l.preco_unitario || 0; cP.font = treb(); cP.numFmt = FMT_EUR; cP.alignment = alinhar('right'); cP.border = trac;
+      cT.value = { formula: 'D' + r + '*F' + r }; cT.font = treb(); cT.numFmt = FMT_EUR; cT.alignment = alinhar('right'); cT.border = trac;
     }
     r++;
   }
   const ultima = r - 1;
-  ws.getRow(r).height = 30; r++;             // linha em branco, como no template
+  ws.getRow(r).height = 30.75; r++;          // linha em branco, como no template
   ws.getRow(r).height = 30;
   if (ultima >= primeira) {
-    ws.getCell(r,6).value = { formula: 'SUBTOTAL(109,F' + primeira + ':F' + ultima + ')' };
-    ws.getCell(r,6).font = treb();
-    ws.getCell(r,6).numFmt = '#,##0.00 "€"';
+    const cT = ws.getCell(r,7);
+    cT.value = { formula: 'SUM(G' + primeira + ':G' + ultima + ')' };
+    cT.font = { name:'Trebuchet MS', size:11, bold:true, color:{ argb:VERDE } };
+    cT.numFmt = FMT_EUR;
+    cT.alignment = alinhar('right');
   }
 
   const buf = await wb.xlsx.writeBuffer();
