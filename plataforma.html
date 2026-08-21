@@ -520,10 +520,10 @@ th .si{opacity:.45;font-size:10px}
         <span class="sep"></span>
         <button class="btn primario mini" onclick="autoPreencher()" title="Preenche automaticamente todos os artigos sem preço cujo melhor match é ≥90%. Marca-os com ⚡ para validares.">⚡ Auto ≥90%</button>
         <button class="btn ghost mini" onclick="matchAutomatico()" title="Percorrer os artigos sem preço e sugerir correspondências da tabela, uma a uma">⚡ Match manual</button>
-        <button class="btn ghost mini" onclick="document.getElementById('importFile').click()" title="Importar mapa de quantidades do computador">⬆ Importar do computador</button>
+        <button class="btn ghost mini" onclick="document.getElementById('importFile').click()" title="Importar um ou vários mapas de quantidades do computador (frações/pisos da mesma obra — o preço de artigos iguais propaga-se)">⬆ Importar do computador</button>
         <button class="btn ghost mini" onclick="spAbrir()" title="Abrir mapa de quantidades a partir do SharePoint">☁ Importar do SharePoint</button>
         <button class="btn ghost mini" onclick="document.getElementById('importPdf').click()" title="Extrair artigos, quantidades e unidades de uma proposta em PDF (fornecedor Landlab). Os preços ficam por atribuir.">📄 Importar de PDF</button>
-        <input type="file" id="importFile" accept=".xlsx,.xls,.xlsm" style="display:none" onchange="importarExcel(this.files[0]); this.value=''">
+        <input type="file" id="importFile" accept=".xlsx,.xls,.xlsm" multiple style="display:none" onchange="importarExcel(this.files); this.value=''">
         <input type="file" id="importPdf" accept=".pdf,application/pdf" style="display:none" onchange="importarPdf(this.files[0]); this.value=''">
       </div>
 
@@ -855,7 +855,7 @@ const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
-const BUILD = '2026-07-29m'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-07-29n'; // ← actualizar em CADA publicação (data + letra)
 
 /* ============================================================
    Estado global
@@ -2685,6 +2685,15 @@ $('linhasCorpo').addEventListener('input', e => {
     l[f] = inp.value;
   }
 });
+// ao confirmar um preço, propaga-o a todos os artigos iguais (várias frações/pisos)
+$('linhasCorpo').addEventListener('change', e => {
+  const inp = e.target.closest('input'); if (!inp || inp.dataset.f !== 'preco_unitario') return;
+  const l = atual && atual.linhas[+inp.dataset.i];
+  if (!l || l.tipo !== 'artigo') return;
+  l.preco_unitario = numPT(inp.value);
+  const n = propagarPreco(l);
+  if (n) { renderLinhas(); toast('Preço aplicado a ' + n + ' artigo' + (n !== 1 ? 's' : '') + ' igual' + (n !== 1 ? 'is' : '') + ' (outras frações/pisos).'); }
+});
 
 function removerLinha(i){
   marcarSujo();
@@ -2822,9 +2831,10 @@ function aplicarMatch(j){
   l.preco_unitario = a.p;
   if (!l.unidade) l.unidade = a.u || '';
   l.codigo = a.c || null;
+  const nprop = propagarPreco(l);
   marcarSujo();
   renderLinhas();
-  toast('Aplicado: ' + fmtEur(a.p) + (a.u ? ' / ' + a.u : ''));
+  toast('Aplicado: ' + fmtEur(a.p) + (a.u ? ' / ' + a.u : '') + (nprop ? ' · +' + nprop + ' igual' + (nprop !== 1 ? 'is' : '') : ''));
   const depois = atual.linhas.findIndex((x, k) => k > pmIdx && x.tipo === 'artigo' && !(x.preco_unitario > 0));
   const prox = depois > -1 ? depois : atual.linhas.findIndex(x => x.tipo === 'artigo' && !(x.preco_unitario > 0));
   if (prox > -1) abrirMatching(prox);
@@ -2856,6 +2866,7 @@ function autoPreencher(){
       if (!l.unidade) l.unidade = a.u || '';
       l.codigo = a.c || null;
       l._auto = Math.round(score * 100);
+      propagarPreco(l);
       nAuto++;
     } else { nRever++; }
   });
@@ -3725,16 +3736,96 @@ function cmConfirmar(){
   $('cmOverlay').classList.remove('aberto');
   CM_ESTADO = null;
   try {
-    importarDoBuffer(wb, folha, hi, ci, preservar);
-  } catch (e) { toast('Erro ao processar: '+e.message, 'erro'); return; }
+    if (MULTI) { const m = MULTI; MULTI = null; importarVarios(m, hi, ci); }
+    else importarDoBuffer(wb, folha, hi, ci, preservar);
+  } catch (e) { MULTI = null; toast('Erro ao processar: '+e.message, 'erro'); return; }
   if (cb) cb();
 }
 
-async function importarExcel(file){
-  if (!file || !atual) return;
+/* ============================================================
+   Vários mapas de quantidades (frações/pisos da mesma obra) + propagação
+   de preço a artigos iguais. Chave de igualdade: descrição+unidade normalizadas.
+   ============================================================ */
+let MULTI = null;
+const chaveArtigo = l => norm(l.descricao || '') + '|' + norm(l.unidade || '');
+function propagarPreco(origem){
+  if (!atual || !origem || origem.tipo !== 'artigo') return 0;
+  const k = chaveArtigo(origem); let n = 0;
+  for (const l of atual.linhas){
+    if (l === origem || l.tipo !== 'artigo') continue;
+    if (chaveArtigo(l) === k && l.preco_unitario !== origem.preco_unitario){
+      l.preco_unitario = origem.preco_unitario;
+      if (origem.codigo && !l.codigo) l.codigo = origem.codigo;
+      if (origem._auto) l._auto = origem._auto;
+      n++;
+    }
+  }
+  return n;
+}
+function contarRepetidos(){
+  const m = {}; for (const l of atual.linhas){ if (l.tipo !== 'artigo') continue; const k = chaveArtigo(l); m[k] = (m[k] || 0) + 1; }
+  let rep = 0; for (const k in m) if (m[k] > 1) rep += m[k];
+  return rep;
+}
+// constrói as linhas de uma folha já mapeada (sem mexer em atual.linhas)
+function linhasDeFolha(folha, hi, ci){
+  const rows = (folha && folha.rows) || [];
+  if (!Number.isInteger(hi) || hi < 0 || hi >= rows.length) hi = (folha && folha.hi != null) ? folha.hi : 0;
+  const novas = [];
+  for (let i = hi + 1; i < rows.length; i++){
+    const r0 = rows[i]; if (!r0) continue;
+    const desc = String(r0[ci.d] ?? '').trim(); if (!desc) continue;
+    const numRaw = ci.n > -1 ? String(r0[ci.n] ?? '').trim().replace(/\.$/, '') : '';
+    const qtd = ci.q > -1 ? numPT(r0[ci.q]) : 0;
+    const un = ci.u > -1 ? String(r0[ci.u] ?? '').trim() : '';
+    const pre = ci.p > -1 ? numPT(r0[ci.p]) : 0;
+    const isNum = /^\d+(\.\d+)*$/.test(numRaw);
+    let tipo;
+    if (qtd > 0 || un) tipo = 'artigo';
+    else if (isNum) tipo = numRaw.includes('.') ? 'subcapitulo' : 'capitulo';
+    else tipo = 'capitulo';
+    novas.push({ tipo, codigo:null, descricao:desc, unidade:un, quantidade: tipo === 'artigo' ? (qtd || 1) : 0, preco_unitario:pre });
+  }
+  return novas;
+}
+// aplica o mesmo mapeamento a vários ficheiros; cada ficheiro vira um capítulo
+function importarVarios(wbs, hi, ci){
+  let todas = [], nFich = 0;
+  for (const { wb, nome } of wbs){
+    const folhas = (wb.SheetNames || []).map(name => ({ name, rows: XLSX.utils.sheet_to_json(wb.Sheets[name], { header:1, defval:null }) })).filter(x => x.rows.length);
+    if (!folhas.length) continue;
+    const folha = folhas.find(x => cmAcharCab(x.rows) === hi) || folhas.find(x => x.rows.length > hi) || folhas[0];
+    const lf = linhasDeFolha(folha, hi, ci);
+    if (!lf.length) continue;
+    const cap = String(nome).replace(/\.(xlsx|xls|xlsm)$/i, '').trim() || ('Ficheiro ' + (nFich + 1));
+    todas.push({ tipo:'capitulo', codigo:null, descricao: cap, unidade:'', quantidade:0, preco_unitario:0 });
+    todas = todas.concat(lf);
+    nFich++;
+  }
+  if (!todas.length){ toast('Não consegui extrair linhas dos ficheiros (verifica o mapeamento de colunas).', 'erro'); return; }
+  if (atual.linhas.length){
+    if (confirm(nFich + ' ficheiro(s) importados.\n\nOK = substituir as linhas atuais · Cancelar = acrescentar no fim')) atual.linhas = todas;
+    else atual.linhas = atual.linhas.concat(todas);
+  } else atual.linhas = todas;
+  marcarSujo(); renderLinhas(); if (typeof actualizarSpOrigemLabel === 'function') actualizarSpOrigemLabel();
+  const rep = contarRepetidos(), nArt = todas.filter(l => l.tipo === 'artigo').length;
+  toast('Importados ' + nFich + ' ficheiros · ' + nArt + ' artigos' + (rep ? ' · ' + rep + ' repetidos (o preço propaga-se)' : ''));
+}
+
+async function importarExcel(fileOrFiles){
+  if (!atual) return;
+  const files = (fileOrFiles && fileOrFiles.length !== undefined && !(fileOrFiles instanceof File)) ? [...fileOrFiles] : (fileOrFiles ? [fileOrFiles] : []);
+  if (!files.length) return;
   try {
-    const wb = XLSX.read(await file.arrayBuffer(), { type:'array' });
-    cmAbrir(wb, file.name || 'Excel', false, null);
+    if (files.length === 1) {
+      const wb = XLSX.read(await files[0].arrayBuffer(), { type:'array' });
+      cmAbrir(wb, files[0].name || 'Excel', false, null);
+      return;
+    }
+    const wbs = [];
+    for (const f of files) wbs.push({ nome: f.name || 'Excel', wb: XLSX.read(await f.arrayBuffer(), { type:'array' }) });
+    MULTI = wbs;
+    cmAbrir(wbs[0].wb, wbs[0].nome + '  ·  aplica-se aos ' + wbs.length + ' ficheiros', false, null);
   }
   catch (e) { toast('Erro ao importar: ' + e.message, 'erro'); }
 }
