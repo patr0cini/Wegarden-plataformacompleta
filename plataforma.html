@@ -420,6 +420,7 @@ th .si{opacity:.45;font-size:10px}
     <div style="display:flex;gap:6px;margin-bottom:10px">
       <button class="btn mini primario" id="pipVistaNovos" onclick="mudarVistaPip('novos')">🆕 Por iniciar <span id="pipNovosN"></span></button>
       <button class="btn mini ghost" id="pipVistaCurso" onclick="mudarVistaPip('curso')">🚧 Em curso <span id="pipCursoN"></span></button>
+      <button class="btn mini ghost" id="pipVistaEnviados" onclick="mudarVistaPip('enviados')">📤 Enviados <span id="pipEnviadosN"></span></button>
       <button class="btn mini ghost" id="pipVistaRever" onclick="mudarVistaPip('rever')">❓ Para rever <span id="pipReverN"></span></button>
       <button class="btn mini ghost" id="pipVistaFora" onclick="mudarVistaPip('fora')">🚫 Fora de Zona <span id="pipForaN"></span></button>
       <button class="btn mini primario" id="btnNovos" style="display:none;margin-left:auto" onclick="abrirNovosPedidos()"></button>
@@ -857,7 +858,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-09-22b'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-09-22c'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -1189,11 +1190,14 @@ let pipVista = 'novos';
 // Um pedido está «por iniciar» enquanto não arrancou (sem estado, Não iniciado ou Novo).
 function eNaoIniciadoEstado(e){ return !e || e === 'Não iniciado' || e === 'Novo'; }
 function eNaoIniciado(p){ return eNaoIniciadoEstado(p.estado); }
+// Proposta já enviada (fase distinta de «em execução»).
+function eEnviado(p){ return /enviad/i.test(p.estado || ''); }
 function mudarVistaPip(v){
   if (v === 'ativos') v = 'novos';
   pipVista = v;
   $('pipVistaNovos').className = 'btn mini' + (v === 'novos' ? ' primario' : ' ghost');
   $('pipVistaCurso').className = 'btn mini' + (v === 'curso' ? ' primario' : ' ghost');
+  $('pipVistaEnviados').className = 'btn mini' + (v === 'enviados' ? ' primario' : ' ghost');
   $('pipVistaRever').className = 'btn mini' + (v === 'rever' ? ' primario' : ' ghost');
   $('pipVistaFora').className = 'btn mini' + (v === 'fora' ? ' primario' : ' ghost');
   renderPipeline();
@@ -2177,19 +2181,21 @@ function renderPipeline(){
   // contadores dos separadores (sem os associados)
   const vivo = p => !eAssociado(p) && p.estado !== 'Fora de Zona' && p.estado !== 'Para rever';
   const nNovos = pedidos.filter(p => vivo(p) && eNaoIniciado(p)).length;
-  const nCurso = pedidos.filter(p => vivo(p) && !eNaoIniciado(p)).length;
+  const nEnviados = pedidos.filter(p => vivo(p) && eEnviado(p)).length;
+  const nCurso = pedidos.filter(p => vivo(p) && !eNaoIniciado(p) && !eEnviado(p)).length;
   const nFora = pedidos.filter(p => !eAssociado(p) && p.estado === 'Fora de Zona').length;
   const nRever = pedidos.filter(p => !eAssociado(p) && p.estado === 'Para rever').length;
   const setN = (id, n) => { const el = $(id); if (el) el.textContent = n ? '(' + n + ')' : ''; };
-  setN('pipNovosN', nNovos); setN('pipCursoN', nCurso); setN('pipForaN', nFora); setN('pipReverN', nRever);
+  setN('pipNovosN', nNovos); setN('pipCursoN', nCurso); setN('pipEnviadosN', nEnviados); setN('pipForaN', nFora); setN('pipReverN', nRever);
   const lista = pedidos.filter(p => {
     if (eAssociado(p)) return false;
     if (pipVista === 'fora') { if (p.estado !== 'Fora de Zona') return false; }
     else if (pipVista === 'rever') { if (p.estado !== 'Para rever') return false; }
     else {
       if (p.estado === 'Fora de Zona' || p.estado === 'Para rever') return false;
-      if (pipVista === 'curso' && eNaoIniciado(p)) return false;   // 🚧 só os já iniciados
-      if (pipVista !== 'curso' && !eNaoIniciado(p)) return false;  // 🆕 só os por iniciar (novos/ativos)
+      if (pipVista === 'novos' && !eNaoIniciado(p)) return false;                  // 🆕 por iniciar
+      if (pipVista === 'enviados' && !eEnviado(p)) return false;                   // 📤 propostas enviadas
+      if (pipVista === 'curso' && (eNaoIniciado(p) || eEnviado(p))) return false;  // 🚧 iniciados, ainda não enviados
     }
     if (fe && p.estado !== fe) return false;
     if (!q) return true;
@@ -2343,7 +2349,7 @@ function kpiFiltroPip(estado){
   const aLimpar = (sel.value === estado);
   sel.value = aLimpar ? '' : estado;
   // levar ao separador certo: estados «por iniciar» → 🆕 novos; restantes → 🚧 em curso
-  const alvo = aLimpar ? pipVista : (eNaoIniciadoEstado(estado) ? 'novos' : 'curso');
+  const alvo = aLimpar ? pipVista : (eNaoIniciadoEstado(estado) ? 'novos' : (/enviad/i.test(estado) ? 'enviados' : 'curso'));
   if (pipVista !== alvo) mudarVistaPip(alvo); else renderPipeline();
 }
 
