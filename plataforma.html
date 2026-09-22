@@ -137,6 +137,10 @@ tbody tr.clicavel{cursor:pointer}
 tbody tr.clicavel:hover{background:#FAF9F4}
 tbody tr.linha-fora-zona td{opacity:.4;filter:saturate(.4)}
 tbody tr.linha-fora-zona:hover td{opacity:1;filter:saturate(1)}
+#pipCorpo tr .ver-hover{visibility:hidden;white-space:nowrap;margin-left:8px;font-size:12px}
+#pipCorpo tr:hover .ver-hover{visibility:visible}
+.ver-hover a{text-decoration:none;margin-right:8px;color:#4A7C29;font-weight:600}
+.ver-hover a:hover{text-decoration:underline}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .vazio{padding:48px 20px;text-align:center;color:var(--cinza);font-size:13.5px}
 
@@ -858,7 +862,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-09-22c'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-09-22d'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -1757,6 +1761,25 @@ async function emailPedido(pid, win){
   } catch (e) { if (win) win.close(); toast('Erro: ' + e.message, 'erro'); }
 }
 
+// Abre o Excel do orçamento (o que está/foi enviado) da pasta SharePoint deste pedido.
+// Reutiliza sp-ficheiros ?acao=excelDaPasta (procura o mais recente na subpasta Orçamentos).
+async function abrirExcelEnviadoPedido(pid){
+  const p = pedidos.find(x => String(x.id) === String(pid));
+  if (!p) return;
+  if (!p.sharepoint_url) { toast('Este pedido ainda não tem pasta no SharePoint.', 'erro'); return; }
+  const win = window.open('', '_blank');
+  try {
+    const cod = codigoDaPasta(p.sharepoint_url);
+    const pasta = cod ? pastasSharePoint.find(x => x.codigo === cod) : null;
+    if (!pasta) throw new Error('não encontrei a pasta desta obra na listagem do SharePoint');
+    toast('A procurar o Excel na pasta…');
+    const j = await (await fetch(FN_SPFICH + '?acao=excelDaPasta&drive=' + encodeURIComponent(pasta.drive) + '&item=' + encodeURIComponent(pasta.item), { headers: { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key } })).json();
+    if (!j.ok) throw new Error(j.message || 'não encontrei o Excel na pasta');
+    win.location = j.webUrl;
+    toast('📊 ' + j.nome + (j.total > 1 ? ' — o mais recente de ' + j.total : ''));
+  } catch (e) { win.close(); toast('Excel: ' + e.message, 'erro'); }
+}
+
 function chipPedido(estado){
   const m = { 'Em análise':'ambar', 'Proposta enviada':'azul', 'Não iniciado':'cinza', 'Fora de Zona':'terra', 'No SharePoint':'roxo' };
   return '<span class="chip ' + (m[estado] || 'cinza') + '">' + esc(estado || '—') + '</span>';
@@ -2214,7 +2237,12 @@ function renderPipeline(){
     '<td>' + esc(p.pedido || '—') +
       ((pipAssocPor[String(p.id)] || []).length
         ? ' <a href="#" class="chip roxo" onclick="verAssociados(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="' + (pipAssocPor[String(p.id)] || []).length + ' email(s) associado(s) a esta obra — clica para ver" style="text-decoration:none">🔗' + (pipAssocPor[String(p.id)] || []).length + '</a>'
-        : '') + '</td>' +
+        : '')
+      + '<span class="ver-hover">'
+        + '<a href="#" onclick="emailPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\', window.open(\'\',\'_blank\')); return false" title="Ver o email deste pedido no Outlook">👁️ Email</a>'
+        + (p.sharepoint_url ? '<a href="#" onclick="abrirExcelEnviadoPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Ver o Excel do orçamento (o mais recente na pasta)">📊 Excel</a>' : '')
+      + '</span>'
+      + '</td>' +
     '<td>' + esc(p.remetente || '—') + '</td>' +
     '<td>' + esc(p.localizacao || '—') + '</td>' +
     '<td>' + esc(p.tipo || '—') + '</td>' +
