@@ -855,7 +855,23 @@ const FN_PRECOS = NOVO.url + '/functions/v1/tabela-precos';
 const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
-const BUILD = '2026-07-29n'; // ← actualizar em CADA publicação (data + letra)
+const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
+const BUILD = '2026-09-22a'; // ← actualizar em CADA publicação (data + letra)
+
+// Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
+// (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
+// falha a operação principal. O id do Graph pode estar obsoleto se o email já saiu da inbox
+// (movido/apagado) — nesse caso a marcação falha em silêncio, o que é aceitável.
+function marcarCategoriaEmail(emailId, estado){
+  if (!emailId) return;
+  try {
+    fetch(FN_TRIAGEM + '?marcar=1', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key },
+      body: JSON.stringify({ email_id: emailId, estado: estado })
+    }).catch(function(e){ console.warn('categoria Outlook:', e && e.message); });
+  } catch (e) { console.warn('categoria Outlook:', e && e.message); }
+}
 
 /* ============================================================
    Estado global
@@ -1198,6 +1214,7 @@ async function mudarEstadoPedido(id, estado){
     await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(id), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify({ estado }) });
     const p = pedidos.find(x => String(x.id) === String(id));
     if (p) p.estado = estado;
+    if (p && p.origem_email_id) marcarCategoriaEmail(p.origem_email_id, estado); // bandeira no Outlook
     toast(estado === 'Fora de Zona' ? 'Movido para o separador 🚫 Fora de Zona'
       : estado === 'Para rever' ? 'Movido para o separador ❓ Para rever'
       : 'Estado actualizado na pipeline');
@@ -1600,6 +1617,7 @@ async function ligarEscolhida(i){
     await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(p.id), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify(corpo) });
     p.sharepoint_url = pp.webUrl;
     if (corpo.estado) p.estado = corpo.estado;
+    if (corpo.estado && p.origem_email_id) marcarCategoriaEmail(p.origem_email_id, corpo.estado); // bandeira no Outlook
     if (corpo.associado_a) p.associado_a = corpo.associado_a;
     LIGAR = null; LIGAR_ASSOC_NOVO = false;
     emFechar();
@@ -1864,6 +1882,7 @@ async function criarPastaPedido(pid, opts){
     p.sharepoint_url = url;
     if (promoverEstado) {
       p.estado = 'No SharePoint';
+      if (p.origem_email_id) marcarCategoriaEmail(p.origem_email_id, 'No SharePoint'); // bandeira no Outlook
       if (!pipEstados.includes('No SharePoint')) {
         pipEstados.push('No SharePoint');
         $('pipEstado').innerHTML = '<option value="">Todos os estados</option>' + pipEstados.filter(e => e !== 'Fora de Zona' && e !== 'Para rever').map(e => '<option>' + esc(e) + '</option>').join('');
