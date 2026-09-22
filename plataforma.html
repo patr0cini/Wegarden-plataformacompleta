@@ -418,7 +418,8 @@ th .si{opacity:.45;font-size:10px}
     </div>
     <div class="kpis" id="pipKpis"></div>
     <div style="display:flex;gap:6px;margin-bottom:10px">
-      <button class="btn mini primario" id="pipVistaAtivos" onclick="mudarVistaPip('ativos')">Ativos</button>
+      <button class="btn mini primario" id="pipVistaNovos" onclick="mudarVistaPip('novos')">🆕 Por iniciar <span id="pipNovosN"></span></button>
+      <button class="btn mini ghost" id="pipVistaCurso" onclick="mudarVistaPip('curso')">🚧 Em curso <span id="pipCursoN"></span></button>
       <button class="btn mini ghost" id="pipVistaRever" onclick="mudarVistaPip('rever')">❓ Para rever <span id="pipReverN"></span></button>
       <button class="btn mini ghost" id="pipVistaFora" onclick="mudarVistaPip('fora')">🚫 Fora de Zona <span id="pipForaN"></span></button>
       <button class="btn mini primario" id="btnNovos" style="display:none;margin-left:auto" onclick="abrirNovosPedidos()"></button>
@@ -856,7 +857,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-09-22a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-09-22b'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -1181,12 +1182,18 @@ async function estadoTriagem(){
   } catch (_) { el.textContent = ''; }
 }
 
-/* Vista da pipeline: 'ativos' (sem Fora de Zona nem Para rever), 'rever' (triagem
-   incerta — o utilizador promove mudando o estado, ou apaga) ou 'fora' */
-let pipVista = 'ativos';
+/* Vista da pipeline: 'novos' (por iniciar), 'curso' (já iniciados — No SharePoint,
+   Em análise, Proposta enviada, etc.), 'rever' (triagem incerta) ou 'fora'.
+   'ativos' mantém-se como alias de 'novos' para retrocompatibilidade. */
+let pipVista = 'novos';
+// Um pedido está «por iniciar» enquanto não arrancou (sem estado, Não iniciado ou Novo).
+function eNaoIniciadoEstado(e){ return !e || e === 'Não iniciado' || e === 'Novo'; }
+function eNaoIniciado(p){ return eNaoIniciadoEstado(p.estado); }
 function mudarVistaPip(v){
+  if (v === 'ativos') v = 'novos';
   pipVista = v;
-  $('pipVistaAtivos').className = 'btn mini' + (v === 'ativos' ? ' primario' : ' ghost');
+  $('pipVistaNovos').className = 'btn mini' + (v === 'novos' ? ' primario' : ' ghost');
+  $('pipVistaCurso').className = 'btn mini' + (v === 'curso' ? ' primario' : ' ghost');
   $('pipVistaRever').className = 'btn mini' + (v === 'rever' ? ' primario' : ' ghost');
   $('pipVistaFora').className = 'btn mini' + (v === 'fora' ? ' primario' : ' ghost');
   renderPipeline();
@@ -2168,17 +2175,22 @@ function renderPipeline(){
   pipAssocPor = assocPor;
   const eAssociado = p => p.associado_a && ids.has(String(p.associado_a)) && String(p.associado_a) !== String(p.id);
   // contadores dos separadores (sem os associados)
+  const vivo = p => !eAssociado(p) && p.estado !== 'Fora de Zona' && p.estado !== 'Para rever';
+  const nNovos = pedidos.filter(p => vivo(p) && eNaoIniciado(p)).length;
+  const nCurso = pedidos.filter(p => vivo(p) && !eNaoIniciado(p)).length;
   const nFora = pedidos.filter(p => !eAssociado(p) && p.estado === 'Fora de Zona').length;
   const nRever = pedidos.filter(p => !eAssociado(p) && p.estado === 'Para rever').length;
-  const elFora = $('pipForaN');
-  if (elFora) elFora.textContent = nFora ? '(' + nFora + ')' : '';
-  const elRever = $('pipReverN');
-  if (elRever) elRever.textContent = nRever ? '(' + nRever + ')' : '';
+  const setN = (id, n) => { const el = $(id); if (el) el.textContent = n ? '(' + n + ')' : ''; };
+  setN('pipNovosN', nNovos); setN('pipCursoN', nCurso); setN('pipForaN', nFora); setN('pipReverN', nRever);
   const lista = pedidos.filter(p => {
     if (eAssociado(p)) return false;
     if (pipVista === 'fora') { if (p.estado !== 'Fora de Zona') return false; }
     else if (pipVista === 'rever') { if (p.estado !== 'Para rever') return false; }
-    else if (p.estado === 'Fora de Zona' || p.estado === 'Para rever') return false;
+    else {
+      if (p.estado === 'Fora de Zona' || p.estado === 'Para rever') return false;
+      if (pipVista === 'curso' && eNaoIniciado(p)) return false;   // 🚧 só os já iniciados
+      if (pipVista !== 'curso' && !eNaoIniciado(p)) return false;  // 🆕 só os por iniciar (novos/ativos)
+    }
     if (fe && p.estado !== fe) return false;
     if (!q) return true;
     const assoc = assocPor[String(p.id)] || [];
@@ -2328,8 +2340,11 @@ function renderKpisPip(){
 
 function kpiFiltroPip(estado){
   const sel = $('pipEstado');
-  sel.value = (sel.value === estado) ? '' : estado;
-  if (pipVista !== 'ativos') mudarVistaPip('ativos'); else renderPipeline();
+  const aLimpar = (sel.value === estado);
+  sel.value = aLimpar ? '' : estado;
+  // levar ao separador certo: estados «por iniciar» → 🆕 novos; restantes → 🚧 em curso
+  const alvo = aLimpar ? pipVista : (eNaoIniciadoEstado(estado) ? 'novos' : 'curso');
+  if (pipVista !== alvo) mudarVistaPip(alvo); else renderPipeline();
 }
 
 /* A pasta do URL existe mesmo no SharePoint? (compara com a listagem pastas2026;
