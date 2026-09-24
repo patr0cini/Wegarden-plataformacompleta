@@ -559,6 +559,11 @@ th .si{opacity:.45;font-size:10px}
       </div>
       <button class="btn primario" onclick="fuAbrir()">📅 Follow-ups <span id="fuBadge" class="fu-badge" style="display:none">0</span></button>
     </div>
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button class="btn mini primario" id="histVistaLista" onclick="mudarVistaHist('lista')">Histórico</button>
+      <button class="btn mini ghost" id="histVistaGI" onclick="mudarVistaHist('gi')">⭐ Grande Interesse <span id="giN"></span></button>
+    </div>
+    <div id="histListaWrap">
     <div class="kpis" id="histKpis"></div>
     <div class="filtros">
       <input type="text" id="histPesquisa" placeholder="Pesquisar código, obra, requerente…" oninput="renderHistorico()">
@@ -598,6 +603,8 @@ th .si{opacity:.45;font-size:10px}
       </table>
     </div>
     <p style="font-size:12px;color:var(--cinza);margin-top:8px">Clica numa linha para ver e editar — as alterações ficam gravadas na base de dados da plataforma.</p>
+    </div>
+    <div id="giDash" style="display:none"></div>
   </section>
 
 </main>
@@ -862,7 +869,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-09-22d'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-09-24a'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -4293,6 +4300,9 @@ function renderHistorico(){
     }));
 
   const tudoCompleto = tudo.concat(virtuaisSP);
+  // índice por chave (todas as obras, sem filtro) — usado pelo dashboard Grande Interesse
+  histPorChave = {};
+  tudoCompleto.forEach(it => { histPorChave[chaveObra(it)] = it; });
 
   // popular filtro de responsáveis preservando a selecção
   const selR = $('histResp'), atualR = selR.value;
@@ -4340,8 +4350,14 @@ function renderHistorico(){
     const iconeEliminar = it.soSharePoint
       ? '<span style="color:var(--cinza)" title="Só a pasta do SharePoint — nada para eliminar">—</span>'
       : '<a href="#" onclick="event.stopPropagation(); apagarHist(' + idx + '); return false" title="Eliminar este orçamento do histórico" style="text-decoration:none">🗑️</a>';
+    // ⭐ Grande Interesse — só em obras JÁ ENVIADAS, selecionadas à mão
+    const chGI = chaveObra(it);
+    const chArg = esc(String(chGI)).replace(/'/g, "\\'");
+    const iconeGI = eObraEnviada(it)
+      ? ' <a href="#" onclick="event.stopPropagation(); toggleGI(\'' + chArg + '\'); return false" title="' + (giTem(chGI) ? 'Remover das Obras de Grande Interesse' : 'Adicionar às Obras de Grande Interesse') + '" style="text-decoration:none">' + (giTem(chGI) ? '⭐' : '☆') + '</a>'
+      : '';
     return '<tr class="clicavel-linha" onclick="abrirHistEdit(' + idx + ')" title="Clica para ver e editar">' +
-      '<td><b>' + esc(it.codigo) + '</b>' + iconePasta + iconeExcel + '</td>' +
+      '<td><b>' + esc(it.codigo) + '</b>' + iconePasta + iconeExcel + iconeGI + '</td>' +
       '<td onclick="event.stopPropagation()" onmousedown="event.stopPropagation()" onpointerdown="event.stopPropagation()">' + selProgressoHist(idx, it) + '</td>' +
       '<td title="' + esc(it.obra) + '">' + esc(it.obra.length > 48 ? it.obra.slice(0,47) + '…' : (it.obra || '—')) + '</td>' +
       '<td class="num">' + fmtEur(it.total) + '</td>' +
@@ -5191,6 +5207,192 @@ window.addEventListener('beforeunload', e => {
   if (sujo) { e.preventDefault(); e.returnValue = ''; }
 });
 
+/* ============================================================
+   Dashboard «Obras de Grande Interesse» (no separador Histórico)
+   Só obras JÁ ENVIADAS, adicionadas à mão pelo ⭐. Cada obra tem uma
+   timeline: follow-ups/notas + visita (automáticos) + negociações,
+   conversas, emails, visitas, alterações, notas (manuais, tabela obra_eventos).
+   ============================================================ */
+let histVistaAtual = 'lista', obrasGI = [], histPorChave = {}, giEventos = [], giSel = null, giMode = 'crono';
+
+const GI_TIPOS = {
+  followup:  { l:'Follow-up',              e:'⏰', bg:'#FAEEDA', fg:'#854F0B' },
+  email:     { l:'Email',                  e:'✉️', bg:'#E6F1FB', fg:'#0C447C' },
+  negociacao:{ l:'Negociação',             e:'🤝', bg:'#EEEDFE', fg:'#3C3489' },
+  conversa:  { l:'Conversa',               e:'💬', bg:'#E1F5EE', fg:'#085041' },
+  visita:    { l:'Visita à obra',          e:'📍', bg:'#EAF3DE', fg:'#27500A' },
+  alteracao: { l:'Alteração de orçamento', e:'💶', bg:'#FAECE7', fg:'#712B13' },
+  nota:      { l:'Nota',                    e:'📝', bg:'#F1EFE8', fg:'#444441' }
+};
+const GI_ORDEM = ['followup','email','negociacao','conversa','visita','alteracao','nota'];
+
+// chave estável de uma obra do histórico (código quando existe)
+function chaveObra(it){ return String((it && (it.codigo || it.obra)) || ('#' + ((it && it.raw && (it.raw.id || it.raw.idOrig)) || ''))); }
+// obra «enviada» = já foi enviada ao cliente (ou adjudicada/perdida depois disso)
+function eObraEnviada(it){
+  const pe = progressoEfetivo(it);
+  return ['Enviado','Adjudicado','Não Adjudicado'].includes(pe)
+      || ['Proposta enviada','Enviado','Adjudicado','Perdido'].includes(it.estado || '');
+}
+function giTem(ch){ return obrasGI.some(o => o.chave === String(ch)); }
+function giAtualizarBadge(){ const el = $('giN'); if (el) el.textContent = obrasGI.length ? '(' + obrasGI.length + ')' : ''; }
+
+async function carregarGI(){
+  try { obrasGI = await db(NOVO, 'obras_interesse?arquivada=eq.false&select=*&order=criado_em.desc') || []; }
+  catch (e) { obrasGI = []; console.warn('carregarGI:', e.message); }
+  giAtualizarBadge();
+  if (histVistaAtual === 'gi') renderGI(); else renderHistorico();
+}
+
+function mudarVistaHist(v){
+  histVistaAtual = v;
+  $('histVistaLista').className = 'btn mini' + (v === 'lista' ? ' primario' : ' ghost');
+  $('histVistaGI').className   = 'btn mini' + (v === 'gi'    ? ' primario' : ' ghost');
+  $('histListaWrap').style.display = v === 'lista' ? '' : 'none';
+  $('giDash').style.display        = v === 'gi'    ? '' : 'none';
+  if (v === 'gi') { giSel = null; renderGI(); }
+}
+
+async function toggleGI(ch){
+  ch = String(ch);
+  const it = histPorChave[ch];
+  try {
+    if (giTem(ch)) {
+      await db(NOVO, 'obras_interesse?chave=eq.' + encodeURIComponent(ch), { method:'DELETE', headers:{ Prefer:'return=minimal' } });
+      toast('Removida das Obras de Grande Interesse');
+    } else {
+      await db(NOVO, 'obras_interesse', { method:'POST', headers:{ Prefer:'return=minimal' },
+        body: JSON.stringify({ chave: ch, codigo: (it ? it.codigo : ch), nome_obra: (it ? it.obra : ''), criado_por: (spConta ? (spConta.name || spConta.username) : '') }) });
+      toast('⭐ Adicionada às Obras de Grande Interesse');
+    }
+    await carregarGI();
+  } catch (e) { toast('Erro: ' + e.message, 'erro'); }
+}
+
+function giSortEv(a, b){ const x = a.data || '', y = b.data || ''; if (!x && !y) return 0; if (!x) return 1; if (!y) return -1; return y < x ? -1 : (y > x ? 1 : 0); }
+function giDerivados(it){
+  if (!it) return [];
+  const out = (it.followups || []).map(f => ({ tipo: f.tipo === 'nota' ? 'nota' : 'followup', data: f.data || '', titulo: f.nota || '(sem texto)', detalhe: '', autor: f.autor || '', derivado: true }));
+  if (it.visita && String(it.visita).trim() && it.visita !== '—') out.push({ tipo:'visita', data:'', titulo:'Visita marcada: ' + it.visita, detalhe:'', autor:'', derivado:true });
+  return out;
+}
+function giTodosEventos(){
+  const it = histPorChave[giSel];
+  const manuais = giEventos.map(e => ({ id:e.id, tipo:e.tipo, data:e.data || '', titulo:e.titulo || '', detalhe:e.detalhe || '', autor:e.autor || '', derivado:false }));
+  return giDerivados(it).concat(manuais);
+}
+
+async function renderGI(){
+  const el = $('giDash'); if (!el) return;
+  if (!giSel) { renderGIOverview(el); return; }
+  renderGIDetalhe(el);
+}
+
+function renderGIOverview(el){
+  if (!obrasGI.length) {
+    el.innerHTML = '<div class="vazio" style="padding:40px 20px">Ainda não há obras de grande interesse.<br><span style="font-size:12.5px;color:var(--cinza)">No separador «Histórico», marca com ⭐ uma obra já enviada para a acompanhares aqui.</span></div>';
+    return;
+  }
+  const cards = obrasGI.map(o => {
+    const it = histPorChave[o.chave];
+    const valor = it ? it.total : 0;
+    const prog = it ? progressoEfetivo(it) : '—';
+    const nFu = it ? (it.followups || []).length : 0;
+    const conc = it && (String(it.concurso).toLowerCase() === 'sim');
+    const nome = (it && it.obra) || o.nome_obra || '—';
+    return '<div onclick="abrirObraGI(\'' + esc(String(o.chave)).replace(/'/g, "\\'") + '\')" style="background:#fff;border:1px solid var(--linha);border-radius:12px;padding:14px 16px;cursor:pointer">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span style="font-family:monospace;font-size:12px;color:var(--cinza)">' + esc(o.codigo || o.chave) + '</span><span style="font-size:12px;color:var(--cinza)">' + esc(prog) + '</span></div>' +
+      '<div style="font-size:15px;font-weight:600;margin:6px 0 8px">' + esc(nome.length > 46 ? nome.slice(0,45) + '…' : nome) + '</div>' +
+      '<div style="font-size:20px;font-weight:700;color:var(--verde-escuro,#455F51)">' + fmtEur(valor) + '</div>' +
+      '<div style="display:flex;gap:14px;margin-top:10px;font-size:12px;color:var(--cinza)">' +
+        '<span>⏰ ' + nFu + ' follow-ups</span>' + (conc ? '<span style="color:#3C3489">⚖ concurso</span>' : '') +
+      '</div></div>';
+  }).join('');
+  el.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">' + cards + '</div>';
+}
+
+async function abrirObraGI(ch){
+  giSel = String(ch); giMode = 'crono';
+  try { giEventos = await db(NOVO, 'obra_eventos?obra_chave=eq.' + encodeURIComponent(giSel) + '&select=*&order=data.desc.nullslast,id.desc') || []; }
+  catch (e) { giEventos = []; console.warn('eventos:', e.message); }
+  renderGI();
+}
+function giVoltar(){ giSel = null; renderGI(); }
+
+function giEvHTML(e){
+  const t = GI_TIPOS[e.tipo] || GI_TIPOS.nota;
+  const del = (!e.derivado && e.id) ? ' <a href="#" onclick="apagarEventoGI(' + e.id + '); return false" title="Apagar esta entrada" style="text-decoration:none;color:var(--cinza)">✕</a>' : '';
+  return '<div style="display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--linha)">' +
+    '<span style="align-self:flex-start;white-space:nowrap;font-size:12px;padding:3px 9px;border-radius:999px;background:' + t.bg + ';color:' + t.fg + '">' + t.e + ' ' + t.l + '</span>' +
+    '<div style="flex:1"><div style="font-size:14px;font-weight:600">' + esc(e.titulo) + del + '</div>' +
+    (e.detalhe ? '<div style="font-size:13px;color:var(--cinza);margin-top:2px">' + esc(e.detalhe) + '</div>' : '') +
+    '<div style="font-size:11.5px;color:var(--cinza);margin-top:4px">' + (e.autor ? esc(e.autor) + ' · ' : '') + (e.data ? fmtData(e.data) : 'sem data') + (e.derivado ? ' · automático' : '') + '</div></div></div>';
+}
+function renderTimelineGI(){
+  const evs = giTodosEventos();
+  if (!evs.length) return '<div style="padding:16px 0;font-size:13px;color:var(--cinza)">Ainda sem atividade. Adiciona a primeira entrada abaixo.</div>';
+  if (giMode === 'crono') return evs.slice().sort(giSortEv).map(giEvHTML).join('');
+  let out = '';
+  GI_ORDEM.forEach(tp => {
+    const g = evs.filter(e => e.tipo === tp).sort(giSortEv);
+    if (!g.length) return;
+    const t = GI_TIPOS[tp];
+    out += '<div style="margin-top:12px"><div style="font-size:12px;padding:3px 9px;border-radius:999px;display:inline-block;background:' + t.bg + ';color:' + t.fg + '">' + t.e + ' ' + t.l + ' (' + g.length + ')</div>' + g.map(giEvHTML).join('') + '</div>';
+  });
+  return out;
+}
+
+function renderGIDetalhe(el){
+  const o = obrasGI.find(x => x.chave === giSel) || {};
+  const it = histPorChave[giSel];
+  const nome = (it && it.obra) || o.nome_obra || '—';
+  const info = [['Valor', it ? fmtEur(it.total) : '—'], ['Progresso', it ? progressoEfetivo(it) : '—'], ['Concurso', (it && it.concurso) || '—'], ['Visita', (it && it.visita) || '—'], ['Arranque', (it && it.arranque) || '—']];
+  const infoHTML = info.map(p => '<div><div style="font-size:11.5px;color:var(--cinza)">' + p[0] + '</div><div style="font-size:14px;font-weight:600">' + esc(String(p[1])) + '</div></div>').join('');
+  const opts = GI_ORDEM.map(k => '<option value="' + k + '">' + GI_TIPOS[k].l + '</option>').join('');
+  const btn = (m, txt) => '<button class="btn mini' + (giMode === m ? ' primario' : ' ghost') + '" id="giM-' + m + '" onclick="giSetMode(\'' + m + '\')">' + txt + '</button>';
+  el.innerHTML =
+    '<button class="btn mini ghost" style="margin-bottom:12px" onclick="giVoltar()">← Todas as obras</button>' +
+    ' <a href="#" onclick="toggleGI(\'' + esc(String(giSel)).replace(/'/g, "\\'") + '\').then(()=>{ if(!giTem(\'' + esc(String(giSel)).replace(/'/g, "\\'") + '\')) giVoltar(); }); return false" style="font-size:12px;color:var(--cinza);text-decoration:none" title="Remover das Obras de Grande Interesse">⭐ remover</a>' +
+    '<div style="font-family:monospace;font-size:12px;color:var(--cinza)">' + esc(o.codigo || giSel) + ((it && String(it.concurso).toLowerCase() === 'sim') ? ' · concurso' : '') + '</div>' +
+    '<div style="font-size:18px;font-weight:700;margin:2px 0 12px">' + esc(nome) + '</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:12px;background:var(--verde-suave,#F0F4EE);border-radius:8px;padding:12px 14px">' + infoHTML + '</div>' +
+    '<div style="display:flex;align-items:center;gap:8px;margin:18px 0 4px"><b>Timeline</b><span style="margin-left:auto;display:inline-flex;gap:6px">' + btn('crono','Cronológica') + btn('cat','Por categoria') + '</span></div>' +
+    '<div id="giTimeline">' + renderTimelineGI() + '</div>' +
+    '<div style="margin-top:16px;background:#fff;border:1px solid var(--linha);border-radius:8px;padding:12px 14px">' +
+      '<div style="font-size:13px;font-weight:600;margin-bottom:10px">Adicionar entrada</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">' +
+        '<div><label style="font-size:11.5px;color:var(--cinza)">Tipo</label><select id="giTp" style="width:100%">' + opts + '</select></div>' +
+        '<div><label style="font-size:11.5px;color:var(--cinza)">Data</label><input id="giDt" type="date" style="width:100%"></div></div>' +
+      '<label style="font-size:11.5px;color:var(--cinza)">Descrição</label><input id="giTx" placeholder="O que aconteceu" style="width:100%;margin-bottom:6px">' +
+      '<textarea id="giDet" placeholder="Detalhe (opcional)" style="width:100%;min-height:44px;margin-bottom:8px"></textarea>' +
+      '<div style="display:flex;align-items:center;gap:10px"><button class="btn mini primario" onclick="addEventoGI()">➕ Adicionar</button><span id="giErr" style="font-size:12.5px;color:#c0392b"></span></div>' +
+    '</div>';
+  const dt = $('giDt'); if (dt) dt.value = new Date().toISOString().slice(0,10);
+}
+function giSetMode(m){
+  giMode = m;
+  const c = $('giM-crono'), k = $('giM-cat'), t = $('giTimeline');
+  if (c) c.className = 'btn mini' + (m === 'crono' ? ' primario' : ' ghost');
+  if (k) k.className = 'btn mini' + (m === 'cat' ? ' primario' : ' ghost');
+  if (t) t.innerHTML = renderTimelineGI();
+}
+
+async function addEventoGI(){
+  const tx = ($('giTx').value || '').trim();
+  if (!tx) { $('giErr').textContent = 'Escreve uma descrição primeiro.'; return; }
+  try {
+    await db(NOVO, 'obra_eventos', { method:'POST', headers:{ Prefer:'return=minimal' },
+      body: JSON.stringify({ obra_chave: giSel, tipo: $('giTp').value, data: $('giDt').value || null, titulo: tx, detalhe: ($('giDet').value || '').trim(), autor: (spConta ? (spConta.name || spConta.username) : '') }) });
+    toast('Entrada adicionada');
+    await abrirObraGI(giSel);
+  } catch (e) { $('giErr').textContent = 'Erro: ' + e.message; }
+}
+async function apagarEventoGI(id){
+  if (!confirm('Apagar esta entrada da timeline?')) return;
+  try { await db(NOVO, 'obra_eventos?id=eq.' + encodeURIComponent(id), { method:'DELETE', headers:{ Prefer:'return=minimal' } }); await abrirObraGI(giSel); }
+  catch (e) { toast('Erro ao apagar: ' + e.message, 'erro'); }
+}
+
 mudarTab('pipeline');
 carregarEquipa();
 carregarPrecos();
@@ -5198,6 +5400,7 @@ carregarPedidos();
 carregarOrcamentos();
 carregarHistoricoAntigo();
 carregarPastasSharePoint();
+carregarGI();
 </script>
 </body>
 </html>
