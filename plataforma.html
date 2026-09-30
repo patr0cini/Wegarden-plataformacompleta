@@ -869,7 +869,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-09-24a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-09-30a'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -1543,7 +1543,7 @@ async function arquivarEmailAuto(pid, opts){
         try {
           const r = await fetch(FN_EMAIL + '?acao=anexo&id=' + encodeURIComponent(msg.id) + '&anexo=' + encodeURIComponent(a.id), { headers: H });
           if (!r.ok) throw new Error('falha ao obter');
-          await spUploadBytes(driveId, dest, a.nome, await r.arrayBuffer());
+          await spUploadBytes(driveId, dest, nomeComCodigo(a.nome, codigoDaPasta(p.sharepoint_url)), await r.arrayBuffer());
           nAnexos++;
         } catch (e) { erros.push(a.nome + ': ' + e.message); }
       }
@@ -2140,6 +2140,9 @@ async function emExecutar(){
   $('emAcoes').innerHTML = '';
   const headersEmail = { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key };
   let okEml = false, nAnexos = 0, nLinks = 0, erros = [];
+  // código da obra deste pedido — para prefixar os Excel (o «excel do orçamento»)
+  const pedEM = pedidos.find(x => String(x.id) === String(EM.pid));
+  const codOrc = pedEM ? codigoDaPasta(pedEM.sharepoint_url) : '';
 
   // 1) .eml → Emails
   try {
@@ -2159,7 +2162,7 @@ async function emExecutar(){
       const r = await fetch(FN_EMAIL + '?acao=anexo&id=' + encodeURIComponent(EM.msg.id) + '&anexo=' + encodeURIComponent(a.id), { headers: headersEmail });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'falha ao obter');
       const buf = await r.arrayBuffer();
-      await spUploadBytes(EM.driveId, c.dest, a.nome, buf);
+      await spUploadBytes(EM.driveId, c.dest, nomeComCodigo(a.nome, codOrc), buf);
       nAnexos++;
     } catch (e) { erros.push(a.nome + ': ' + e.message); }
   }
@@ -2179,7 +2182,7 @@ async function emExecutar(){
       if (!buf.byteLength) throw new Error('o download veio vazio');
       let nome = l.nome || 'ficheiro-do-link-' + (c.i + 1);
       if (nomeHdr) { try { nome = decodeURIComponent(nomeHdr); } catch (_) { nome = nomeHdr; } }
-      await spUploadBytes(EM.driveId, c.dest, nome, buf);
+      await spUploadBytes(EM.driveId, c.dest, nomeComCodigo(nome, codOrc), buf);
       nLinks++;
     } catch (e) { erros.push('Link ' + (l.nome || l.servico) + ': ' + e.message); }
   }
@@ -2404,6 +2407,16 @@ function codigoDaPasta(url){
   try { s = decodeURIComponent(s); } catch (_) { /* usa o original */ }
   const m = s.match(/ocWG\d{2}_\d{3}/);
   return m ? m[0] : '';
+}
+
+// Prefixa o código da obra (ocWG26_XXX) ao nome de um Excel — o «excel do orçamento» passa
+// a levar o mesmo código da pasta. Só se aplica a ficheiros Excel e não duplica se o nome já
+// tiver um código. Outros ficheiros (pdf, dwg, .eml…) ficam com o nome original.
+function nomeComCodigo(nome, cod){
+  nome = nome || '';
+  if (!cod || !/\.(xlsx?|xlsm|xlsb)$/i.test(nome)) return nome;
+  if (/ocWG\d{2}_\d{3}/i.test(nome)) return nome;
+  return cod + ' - ' + nome;
 }
 
 async function orcamentarPedido(pid){
