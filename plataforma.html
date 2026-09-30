@@ -725,6 +725,8 @@ th .si{opacity:.45;font-size:10px}
 .cm-preview tbody td.cm-ri{background:#f5f5f3;color:#999;text-align:right;width:32px;position:sticky;left:0}
 .cm-preview tbody tr.cm-hrow td{background:#fef9e2;font-weight:700}
 .cm-preview .cm-mapeada{background:#e8f5e9 !important;border-left:2px solid var(--verde);border-right:2px solid var(--verde)}
+.cm-preview td[data-cell]{cursor:pointer}
+.cm-preview td.cm-logo{background:#eaf3de !important;outline:2px solid var(--verde);outline-offset:-2px}
 .cm-sec{font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin:14px 0 8px}
 .cm-grelha{display:grid;grid-template-columns:repeat(3,1fr);gap:10px 16px;margin-bottom:10px}
 .cm-campo{display:flex;flex-direction:column;gap:3px}
@@ -751,6 +753,11 @@ th .si{opacity:.45;font-size:10px}
         <label>Linha de cabeçalho: <select id="cmLinhaCab" onchange="cmRefreshCab()"></select></label>
       </div>
       <div class="cm-preview-wrap"><table class="cm-preview" id="cmPreview"></table></div>
+      <div id="cmLogoBox" style="display:none;margin:0 0 14px;padding:10px 12px;background:#f5f8f1;border:1px solid #d8e6cc;border-radius:6px;font-size:13px">
+        🌿 <b>Logótipo We Garden</b> — clica na célula do preview onde o queres colocar (opcional).
+        <span id="cmLogoInfo" style="color:var(--cinza)">nenhuma célula selecionada</span>
+        <a href="#" id="cmLogoClear" onclick="cmLimparLogo();return false" style="display:none;margin-left:6px;font-size:12px">limpar</a>
+      </div>
       <div class="cm-sec">Mapeamento de colunas</div>
       <div class="cm-grelha">
         <div class="cm-campo" id="cfRef"><label>Ref / Artigo (nº)</label><select id="cmRef" onchange="cmRealcar()"></select></div>
@@ -869,7 +876,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-09-30a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-09-30c'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -3666,6 +3673,38 @@ function cmLetra(n){ let s=''; n=n+1; while(n>0){ const r=(n-1)%26; s=String.fro
 
 let CM_ESTADO = null;
 
+// ── Logótipo We Garden no Excel do orçamento ───────────────────────────
+// Insere o logótipo numa célula do Excel (na pasta SharePoint) via Render/openpyxl — preserva
+// toda a formatação (igual ao fill-excel-sp dos preços) e sobrevive à gravação de preços depois.
+const FN_LOGO = 'https://wegarden-orcamentacao.onrender.com/api/logo-sp';
+async function inserirLogoNoExcel(driveId, itemId, cell, sheet){
+  const tok = await spToken();
+  const resp = await fetch(FN_LOGO, { method:'POST', headers:{ 'Content-Type':'application/json' },
+    body: JSON.stringify({ drive_id: driveId, item_id: itemId, sp_token: tok, cell, sheet: sheet || null }) });
+  const j = await resp.json().catch(() => ({}));
+  if (!resp.ok || j.error) throw new Error(j.error || ('HTTP ' + resp.status));
+  return j;
+}
+// Escolha da célula do logótipo no preview do modal de mapeamento (só com origem SharePoint)
+function cmEscolherLogo(td){
+  const st = CM_ESTADO; if (!st || !st.preservar) return;
+  const cell = td.getAttribute('data-cell'); if (!cell) return;
+  document.querySelectorAll('#cmPreview td.cm-logo').forEach(el => el.classList.remove('cm-logo'));
+  td.classList.add('cm-logo');
+  st.logoCell = cell; st.logoSheet = st.folhas[st.idx].name;
+  const conteudo = (td.textContent || '').trim();
+  $('cmLogoInfo').innerHTML = 'Célula <b>' + esc(cell) + '</b>' +
+    (conteudo ? ' <span style="color:#c07a00">⚠ já tem conteúdo: «' + esc(conteudo.slice(0,30)) + '» (o logótipo fica por cima, não apaga)</span>' : ' (vazia)');
+  $('cmLogoClear').style.display = '';
+}
+function cmLimparLogo(){
+  const st = CM_ESTADO; if (!st) return;
+  st.logoCell = null; st.logoSheet = null;
+  document.querySelectorAll('#cmPreview td.cm-logo').forEach(el => el.classList.remove('cm-logo'));
+  $('cmLogoInfo').textContent = 'nenhuma célula selecionada';
+  $('cmLogoClear').style.display = 'none';
+}
+
 /* Abre o modal de correspondência. preservar=true grava spFill (gravação no SP). */
 function cmAbrir(wb, nome, preservar, onConfirmar){
   const folhas = wb.SheetNames.map(name => {
@@ -3677,7 +3716,11 @@ function cmAbrir(wb, nome, preservar, onConfirmar){
   let idxDef = folhas.findIndex(s => s.hi !== null);
   if (idxDef < 0) idxDef = 0;
 
-  CM_ESTADO = { wb, nome, folhas, idx: idxDef, preservar, onConfirmar };
+  CM_ESTADO = { wb, nome, folhas, idx: idxDef, preservar, onConfirmar, logoCell: null, logoSheet: null };
+
+  // opção de logótipo só quando há origem SharePoint (preservar) para onde gravar
+  const lb = $('cmLogoBox'); if (lb) lb.style.display = preservar ? '' : 'none';
+  $('cmLogoInfo').textContent = 'nenhuma célula selecionada'; $('cmLogoClear').style.display = 'none';
 
   const fSel = $('cmFolha');
   fSel.innerHTML = folhas.map((s,i)=>
@@ -3760,12 +3803,17 @@ function cmRenderPreview(hi, nCols){
     for (let c=0;c<nCols;c++){
       let v=(rows[r]||[])[c]; if (v===null||v===undefined) v='';
       v=String(v).substring(0,80);
-      html += '<td data-col="'+c+'">'+esc(v)+'</td>';
+      html += '<td data-col="'+c+'" data-cell="'+cmLetra(c)+(r+1)+'" onclick="cmEscolherLogo(this)">'+esc(v)+'</td>';
     }
     html += '</tr>';
   }
   html += '</tbody>';
   $('cmPreview').innerHTML = html;
+  // re-aplicar o realce da célula do logótipo (se escolhida nesta folha) após reconstruir a tabela
+  if (st.logoCell && st.logoSheet === st.folhas[st.idx].name) {
+    const el = document.querySelector('#cmPreview td[data-cell="' + st.logoCell + '"]');
+    if (el) el.classList.add('cm-logo');
+  }
 }
 
 function cmRealcar(){
@@ -3821,6 +3869,7 @@ function cmConfirmar(){
     v: parseInt($('cmTotal').value,10)
   };
   const preservar = st.preservar, cb = st.onConfirmar, wb = st.wb;
+  const logoCell = st.logoCell, logoSheet = st.logoSheet;
   $('cmOverlay').classList.remove('aberto');
   CM_ESTADO = null;
   try {
@@ -3828,6 +3877,13 @@ function cmConfirmar(){
     else importarDoBuffer(wb, folha, hi, ci, preservar);
   } catch (e) { MULTI = null; toast('Erro ao processar: '+e.message, 'erro'); return; }
   if (cb) cb();
+  // inserir o logótipo no Excel original do SharePoint, na célula escolhida (não bloqueia a importação)
+  if (preservar && logoCell && window.atual && atual.spOrigem) {
+    toast('A inserir o logótipo no Excel…');
+    inserirLogoNoExcel(atual.spOrigem.driveId, atual.spOrigem.itemId, logoCell, logoSheet)
+      .then(() => toast('🌿 Logótipo inserido na célula ' + logoCell))
+      .catch(e => toast('Não consegui inserir o logótipo: ' + e.message, 'erro'));
+  }
 }
 
 /* ============================================================
