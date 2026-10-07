@@ -886,7 +886,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-10-07a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-10-07b'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -5493,11 +5493,13 @@ async function carregarClientes(){
       db(NOVO, 'historico?select=id,cliente_id,nome,valor,ano,adjudicado,data_envio,mes&cliente_id=not.is.null'),
       db(PIPELINE, 'pedidos?select=id,cliente_id,pedido,estado,data,localizacao&cliente_id=not.is.null')
     ]);
+    const evs = await db(NOVO, 'cliente_eventos?select=*&order=data.desc.nullslast,id.desc') || [];
     cliCtx = {};
-    const ctx = id => (cliCtx[id] = cliCtx[id] || { orcs:[], hists:[], peds:[] });
+    const ctx = id => (cliCtx[id] = cliCtx[id] || { orcs:[], hists:[], peds:[], eventos:[] });
     (ocs || []).forEach(o => ctx(o.cliente_id).orcs.push(o));
     (hts || []).forEach(h => ctx(h.cliente_id).hists.push(h));
     (pds || []).forEach(p => ctx(p.cliente_id).peds.push(p));
+    (evs || []).forEach(e => ctx(e.cliente_id).eventos.push(e));
     renderClientes();
   } catch (e) { if (w) w.innerHTML = '<div class="vazio" style="padding:40px;color:#a33">Erro a carregar clientes: ' + esc(e.message) + '</div>'; }
 }
@@ -5534,32 +5536,117 @@ function renderClientes(){
 function abrirCliente(id){ cliSel = id; renderClientes(); }
 function voltarClientes(){ cliSel = null; renderClientes(); }
 
+// Fase 2 — ficha editável: info + contactos + timeline + próxima ação
+const CLI_ORDEM = ['followup','email','negociacao','conversa','visita','nota'];
+const CLI_TIPOS_CLIENTE = ['Construtora','Promotor','Atelier de arquitetura','Câmara / Público','Particular','Outro'];
+let cliEditInfo = false;
+function autorAtual(){ return spConta ? (spConta.name || spConta.username || '') : ''; }
+
 function renderFichaCliente(w){
   const c = clientesLista.find(x => x.id === cliSel); if (!c) { voltarClientes(); return; }
-  const k = cliKpis(c.id), ctx = cliCtx[c.id] || { orcs:[], hists:[], peds:[] }, cons = cliContactos[c.id] || [];
+  const k = cliKpis(c.id), ctx = cliCtx[c.id] || { orcs:[], hists:[], peds:[], eventos:[] }, cons = cliContactos[c.id] || [];
+  // cabeçalho (ver ou editar)
+  let headerHTML;
+  if (cliEditInfo) {
+    const opts = CLI_TIPOS_CLIENTE.map(t => '<option' + (c.tipo === t ? ' selected' : '') + '>' + t + '</option>').join('');
+    headerHTML = '<div style="font-size:20px;font-weight:700">' + esc(c.nome) + '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0">' +
+        '<div><label style="font-size:11.5px;color:var(--cinza)">Tipo</label><select id="cliTipo" style="width:100%"><option value="">—</option>' + opts + '</select></div>' +
+        '<div><label style="font-size:11.5px;color:var(--cinza)">Zona</label><input id="cliZona" value="' + esc(c.zona || '') + '" style="width:100%"></div></div>' +
+      '<label style="font-size:11.5px;color:var(--cinza)">Notas</label><textarea id="cliNotas" style="width:100%;min-height:50px">' + esc(c.notas || '') + '</textarea>' +
+      '<div style="margin-top:8px"><button class="btn mini primario" onclick="cliGuardarInfo()">Guardar</button> <button class="btn mini ghost" onclick="cliEditInfo=false;renderClientes()">Cancelar</button></div>';
+  } else {
+    headerHTML = '<div style="display:flex;align-items:center;gap:10px"><div style="font-size:20px;font-weight:700">' + esc(c.nome) + '</div>' +
+      '<a href="#" onclick="cliEditInfo=true;renderClientes();return false" style="font-size:12px;color:var(--cinza)">✎ editar</a></div>' +
+      '<div style="font-size:12.5px;color:var(--cinza);margin:2px 0 10px">' + esc(c.tipo || 'tipo por definir') + (c.zona ? ' · ' + esc(c.zona) : '') + '</div>' +
+      (c.notas ? '<div style="font-size:12.5px;background:var(--verde-suave,#F0F4EE);border-radius:6px;padding:8px 10px;margin-bottom:10px">' + esc(c.notas) + '</div>' : '');
+  }
   const info = [['Proposto', fmtEur(k.proposto)], ['Adjudicado', fmtEur(k.adjudicado)], ['Taxa', k.taxa + '% (' + k.nAdj + '/' + k.nOrc + ')'], ['Em aberto', fmtEur(k.emAberto)], ['Último contacto', k.ultimo ? fmtData(k.ultimo) : '—']];
   const infoHTML = info.map(p => '<div><div style="font-size:11.5px;color:var(--cinza)">' + p[0] + '</div><div style="font-size:16px;font-weight:600">' + p[1] + '</div></div>').join('');
-  const contactosHTML = cons.length ? cons.map(p => '<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--linha)"><span>👤</span><div><div style="font-size:13px;font-weight:600">' + esc(p.nome || '(sem nome)') + '</div>' + (p.papel ? '<div style="font-size:12px;color:var(--cinza)">' + esc(p.papel) + '</div>' : '') + (p.email ? '<div style="font-size:12px;color:var(--verde,#4A7C29)">' + esc(p.email) + '</div>' : '') + '</div></div>').join('') : '<div style="font-size:12.5px;color:var(--cinza);padding-top:6px">Sem contactos registados.</div>';
+  // próxima ação = follow-up futuro mais próximo
+  const hoje = new Date().toISOString().slice(0,10);
+  const fut = (ctx.eventos || []).filter(e => e.tipo === 'followup' && e.data && e.data >= hoje).sort((a,b) => a.data < b.data ? -1 : 1)[0];
+  const proxHTML = '<div style="background:#eaf1fb;border-radius:8px;padding:10px 12px;margin-bottom:12px"><div style="font-size:12px;color:var(--cinza)">Próxima ação</div>' + (fut ? '<div style="font-size:14px;font-weight:600">⏰ ' + fmtData(fut.data) + ' — ' + esc(fut.titulo || '') + '</div>' : '<div style="font-size:13px;color:var(--cinza)">Sem ação agendada — regista um follow-up na timeline.</div>') + '</div>';
+  // contactos editáveis
+  const contactosHTML = (cons.length ? cons.map(p => '<div style="display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--linha)"><span>👤</span><div style="flex:1"><div style="font-size:13px;font-weight:600">' + esc(p.nome || '(sem nome)') + (p.papel ? ' <span style="font-weight:400;color:var(--cinza)">· ' + esc(p.papel) + '</span>' : '') + '</div>' + (p.email ? '<div style="font-size:12px;color:var(--verde,#4A7C29)">' + esc(p.email) + '</div>' : '') + (p.telefone ? '<div style="font-size:12px;color:var(--cinza)">' + esc(p.telefone) + '</div>' : '') + '</div><a href="#" onclick="cliApagarContacto(' + p.id + ');return false" title="Apagar contacto" style="color:var(--cinza);text-decoration:none">✕</a></div>').join('') : '<div style="font-size:12.5px;color:var(--cinza);padding-top:6px">Sem contactos.</div>') +
+    '<div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:6px">' +
+      '<input id="ctNome" placeholder="Nome" style="font-size:12px;padding:6px 8px"><input id="ctPapel" placeholder="Papel" style="font-size:12px;padding:6px 8px">' +
+      '<input id="ctEmail" placeholder="Email" style="font-size:12px;padding:6px 8px"><input id="ctTel" placeholder="Telefone" style="font-size:12px;padding:6px 8px"></div>' +
+    '<button class="btn mini ghost" style="margin-top:6px" onclick="cliAddContacto()">+ contacto</button>';
+  // orçamentos/obras
   const chipEst = e => { const m = { Adjudicado:'verde', Perdido:'terra', Enviado:'azul', 'Proposta enviada':'azul', 'Em análise':'ambar', 'No SharePoint':'roxo' }; return '<span class="chip ' + (m[e] || 'cinza') + '">' + esc(e || '—') + '</span>'; };
   const linhas = ctx.orcs.map(o => ({ obra:o.nome_obra, val:Number(o.total)||0, est:o.estado, data:o.data_envio }))
     .concat(ctx.hists.map(h => { const a = String(h.adjudicado||'').toLowerCase(); return { obra:h.nome, val:Number(h.valor)||0, est:(a.startsWith('s')?'Adjudicado':a.startsWith('n')?'Perdido':'Histórico'), data:h.data_envio }; }))
     .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
   const orcsHTML = linhas.length ? '<table style="width:100%;border-collapse:collapse;font-size:13px">' + linhas.map(l => '<tr style="border-bottom:1px solid var(--linha)"><td style="padding:7px 4px">' + esc(l.obra || '—') + '</td><td style="padding:7px 4px;white-space:nowrap">' + fmtEur(l.val) + '</td><td style="padding:7px 4px">' + chipEst(l.est) + '</td></tr>').join('') + '</table>' : '<div style="font-size:12.5px;color:var(--cinza)">Sem orçamentos.</div>';
+  // timeline unificada: manual (editável) + derivados (orçamentos/pedidos)
   const evs = [];
-  ctx.orcs.forEach(o => { if (o.data_envio) evs.push({ d:o.data_envio, t:'📤 Orçamento ' + (o.estado || '') + ' — ' + (o.nome_obra || '') }); });
-  ctx.peds.forEach(p => { if (p.data) evs.push({ d:p.data, t:'📥 Pedido: ' + (p.pedido || '') }); });
+  (ctx.eventos || []).forEach(e => evs.push({ d:e.data||'', manual:true, id:e.id, tipo:e.tipo, titulo:e.titulo, detalhe:e.detalhe, autor:e.autor }));
+  ctx.orcs.forEach(o => { if (o.data_envio) evs.push({ d:o.data_envio, tipo:'_orc', titulo:'Orçamento ' + (o.estado||'') + ' — ' + (o.nome_obra||'') }); });
+  ctx.peds.forEach(p => { if (p.data) evs.push({ d:p.data, tipo:'_ped', titulo:'Pedido: ' + (p.pedido||'') }); });
   evs.sort((a, b) => String(b.d).localeCompare(String(a.d)));
-  const tlHTML = evs.length ? evs.slice(0, 25).map(e => '<div style="display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--linha)"><span style="font-size:12px;color:var(--cinza);white-space:nowrap">' + fmtData(e.d) + '</span><span style="font-size:13px">' + esc(e.t) + '</span></div>').join('') : '<div style="font-size:12.5px;color:var(--cinza)">Sem atividade registada.</div>';
+  const evHTML = evs.length ? evs.map(e => {
+    if (e.manual) { const t = GI_TIPOS[e.tipo] || GI_TIPOS.nota;
+      return '<div style="display:flex;gap:10px;padding:9px 0;border-top:1px solid var(--linha)"><span style="align-self:flex-start;white-space:nowrap;font-size:12px;padding:3px 9px;border-radius:999px;background:' + t.bg + ';color:' + t.fg + '">' + t.e + ' ' + t.l + '</span><div style="flex:1"><div style="font-size:13px;font-weight:600">' + esc(e.titulo||'') + ' <a href="#" onclick="cliApagarEvento(' + e.id + ');return false" style="color:var(--cinza);text-decoration:none;font-weight:400">✕</a></div>' + (e.detalhe ? '<div style="font-size:12.5px;color:var(--cinza)">' + esc(e.detalhe) + '</div>' : '') + '<div style="font-size:11.5px;color:var(--cinza);margin-top:2px">' + (e.autor ? esc(e.autor) + ' · ' : '') + (e.d ? fmtData(e.d) : 'sem data') + '</div></div></div>';
+    }
+    const ic = e.tipo === '_orc' ? '📤' : '📥';
+    return '<div style="display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--linha)"><span style="font-size:12px;color:var(--cinza);white-space:nowrap">' + (e.d ? fmtData(e.d) : '—') + '</span><span style="font-size:13px;color:var(--cinza)">' + ic + ' ' + esc(e.titulo||'') + '</span></div>';
+  }).join('') : '<div style="font-size:12.5px;color:var(--cinza)">Sem atividade.</div>';
+  const tpOpts = CLI_ORDEM.map(t => '<option value="' + t + '">' + GI_TIPOS[t].l + '</option>').join('');
+  const addEvHTML = '<div style="margin-top:12px;background:#fff;border:1px solid var(--linha);border-radius:8px;padding:10px 12px">' +
+    '<div style="font-size:12.5px;font-weight:600;margin-bottom:6px">Registar na timeline</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px"><select id="evTipo">' + tpOpts + '</select><input id="evData" type="date"></div>' +
+    '<input id="evTit" placeholder="O que aconteceu (ex.: liguei ao cliente)" style="width:100%;margin-bottom:6px"><input id="evDet" placeholder="Detalhe (opcional)" style="width:100%;margin-bottom:6px">' +
+    '<button class="btn mini primario" onclick="cliAddEvento()">+ registar</button> <span id="evErr" style="font-size:12px;color:#c0392b"></span>' +
+    '<div style="font-size:11px;color:var(--cinza);margin-top:4px">Dica: tipo «Follow-up» com data futura vira a «próxima ação».</div></div>';
   w.innerHTML =
-    '<button class="btn mini ghost" style="margin-bottom:12px" onclick="voltarClientes()">← Todos os clientes</button>' +
-    '<div style="font-size:20px;font-weight:700">' + esc(c.nome) + '</div>' +
-    '<div style="font-size:12.5px;color:var(--cinza);margin:2px 0 14px">' + esc(c.tipo || 'tipo por definir') + (c.zona ? ' · ' + esc(c.zona) : '') + '</div>' +
-    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;background:var(--verde-suave,#F0F4EE);border-radius:8px;padding:12px 14px;margin-bottom:16px">' + infoHTML + '</div>' +
+    '<button class="btn mini ghost" style="margin-bottom:12px" onclick="cliEditInfo=false;voltarClientes()">← Todos os clientes</button>' +
+    headerHTML +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;background:var(--verde-suave,#F0F4EE);border-radius:8px;padding:12px 14px;margin:6px 0 12px">' + infoHTML + '</div>' +
+    proxHTML +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">' +
       '<div><div style="font-size:13px;font-weight:600;margin-bottom:2px">Contactos</div>' + contactosHTML + '</div>' +
       '<div><div style="font-size:13px;font-weight:600;margin-bottom:6px">Orçamentos e obras</div>' + orcsHTML + '</div>' +
     '</div>' +
-    '<div style="font-size:13px;font-weight:600;margin:18px 0 2px">Atividade</div>' + tlHTML;
+    '<div style="font-size:13px;font-weight:600;margin:18px 0 2px">Timeline</div>' + evHTML + addEvHTML;
+  const dt = $('evData'); if (dt) dt.value = new Date().toISOString().slice(0,10);
+}
+
+async function cliGuardarInfo(){
+  const c = clientesLista.find(x => x.id === cliSel); if (!c) return;
+  const tipo = $('cliTipo').value || null, zona = ($('cliZona').value || '').trim() || null, notas = ($('cliNotas').value || '').trim() || null;
+  try {
+    await db(NOVO, 'clientes?id=eq.' + cliSel, { method:'PATCH', headers:{ Prefer:'return=minimal' }, body: JSON.stringify({ tipo, zona, notas }) });
+    c.tipo = tipo; c.zona = zona; c.notas = notas; cliEditInfo = false; toast('Cliente atualizado'); renderClientes();
+  } catch (e) { toast('Erro: ' + e.message, 'erro'); }
+}
+async function cliAddContacto(){
+  const nome = ($('ctNome').value || '').trim(), papel = ($('ctPapel').value || '').trim(), email = ($('ctEmail').value || '').trim(), tel = ($('ctTel').value || '').trim();
+  if (!nome && !email) { toast('Indica pelo menos nome ou email.', 'erro'); return; }
+  try {
+    const r = await db(NOVO, 'contactos', { method:'POST', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ cliente_id: cliSel, nome: nome || null, papel: papel || null, email: email || null, telefone: tel || null }) });
+    (cliContactos[cliSel] = cliContactos[cliSel] || []).push(r[0]); toast('Contacto adicionado'); renderClientes();
+  } catch (e) { toast('Erro: ' + e.message, 'erro'); }
+}
+async function cliApagarContacto(id){
+  if (!confirm('Apagar este contacto?')) return;
+  try { await db(NOVO, 'contactos?id=eq.' + id, { method:'DELETE', headers:{ Prefer:'return=minimal' } });
+    cliContactos[cliSel] = (cliContactos[cliSel] || []).filter(x => x.id !== id); renderClientes();
+  } catch (e) { toast('Erro: ' + e.message, 'erro'); }
+}
+async function cliAddEvento(){
+  const tit = ($('evTit').value || '').trim(); if (!tit) { $('evErr').textContent = 'Escreve o que aconteceu.'; return; }
+  const ev = { cliente_id: cliSel, tipo: $('evTipo').value, data: $('evData').value || null, titulo: tit, detalhe: ($('evDet').value || '').trim() || null, autor: autorAtual() };
+  try {
+    const r = await db(NOVO, 'cliente_eventos', { method:'POST', headers:{ Prefer:'return=representation' }, body: JSON.stringify(ev) });
+    const ctx = cliCtx[cliSel] = cliCtx[cliSel] || { orcs:[], hists:[], peds:[], eventos:[] }; ctx.eventos.unshift(r[0]); toast('Registado na timeline'); renderClientes();
+  } catch (e) { $('evErr').textContent = 'Erro: ' + e.message; }
+}
+async function cliApagarEvento(id){
+  if (!confirm('Apagar esta entrada da timeline?')) return;
+  try { await db(NOVO, 'cliente_eventos?id=eq.' + id, { method:'DELETE', headers:{ Prefer:'return=minimal' } });
+    const ctx = cliCtx[cliSel]; if (ctx) ctx.eventos = ctx.eventos.filter(x => x.id !== id); renderClientes();
+  } catch (e) { toast('Erro: ' + e.message, 'erro'); }
 }
 
 mudarTab('pipeline');
