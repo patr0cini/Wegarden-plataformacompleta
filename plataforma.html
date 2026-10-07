@@ -405,6 +405,7 @@ th .si{opacity:.45;font-size:10px}
     <button class="tab" data-tab="pipeline" onclick="mudarTab('pipeline')">Pipeline</button>
     <button class="tab" data-tab="orcamentacao" onclick="mudarTab('orcamentacao')">Orçamentação</button>
     <button class="tab" data-tab="historico" onclick="mudarTab('historico')">Histórico</button>
+    <button class="tab" data-tab="clientes" onclick="mudarTab('clientes')">Clientes</button>
   </nav>
   <div id="precosChip"><span class="ponto"></span><span id="precosTexto">Tabela de preços: a carregar…</span><button onclick="carregarPrecos()" title="Recarregar do SharePoint">↻</button></div>
 </header>
@@ -605,6 +606,15 @@ th .si{opacity:.45;font-size:10px}
     <p style="font-size:12px;color:var(--cinza);margin-top:8px">Clica numa linha para ver e editar — as alterações ficam gravadas na base de dados da plataforma.</p>
     </div>
     <div id="giDash" style="display:none"></div>
+  </section>
+
+  <!-- ================= CLIENTES (CRM) ================= -->
+  <section class="painel" id="painel-clientes">
+    <div class="painel-topo">
+      <div><h2>Clientes</h2><p>Tudo sobre cada cliente — orçamentos, contactos e atividade.</p></div>
+    </div>
+    <input type="text" id="cliPesquisa" placeholder="Procurar cliente por nome…" oninput="renderClientes()" style="width:100%;max-width:360px;padding:8px 12px;border:1px solid var(--linha);border-radius:8px;font-size:13px;margin-bottom:14px">
+    <div id="cliWrap"><div class="vazio" style="padding:40px">A carregar clientes…</div></div>
   </section>
 
 </main>
@@ -876,7 +886,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-09-30c'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-10-07a'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -5462,6 +5472,96 @@ async function apagarEventoGI(id){
   catch (e) { toast('Erro ao apagar: ' + e.message, 'erro'); }
 }
 
+/* ============================================================
+   Clientes (CRM) — Fase 1: Ficha de Cliente 360 (read-only)
+   Deriva tudo do cliente_id ligado a orçamentos/histórico/pedidos.
+   ============================================================ */
+let clientesLista = [], cliCtx = {}, cliContactos = {}, cliSel = null;
+
+async function carregarClientes(){
+  const w = $('cliWrap');
+  try {
+    const [cls, cons] = await Promise.all([
+      db(NOVO, 'clientes?select=*&order=nome.asc'),
+      db(NOVO, 'contactos?select=*')
+    ]);
+    clientesLista = cls || [];
+    cliContactos = {};
+    (cons || []).forEach(c => { (cliContactos[c.cliente_id] = cliContactos[c.cliente_id] || []).push(c); });
+    const [ocs, hts, pds] = await Promise.all([
+      db(NOVO, 'orcamentos_v2?select=id,cliente_id,nome_obra,total,estado,data_envio,progresso,concurso&cliente_id=not.is.null'),
+      db(NOVO, 'historico?select=id,cliente_id,nome,valor,ano,adjudicado,data_envio,mes&cliente_id=not.is.null'),
+      db(PIPELINE, 'pedidos?select=id,cliente_id,pedido,estado,data,localizacao&cliente_id=not.is.null')
+    ]);
+    cliCtx = {};
+    const ctx = id => (cliCtx[id] = cliCtx[id] || { orcs:[], hists:[], peds:[] });
+    (ocs || []).forEach(o => ctx(o.cliente_id).orcs.push(o));
+    (hts || []).forEach(h => ctx(h.cliente_id).hists.push(h));
+    (pds || []).forEach(p => ctx(p.cliente_id).peds.push(p));
+    renderClientes();
+  } catch (e) { if (w) w.innerHTML = '<div class="vazio" style="padding:40px;color:#a33">Erro a carregar clientes: ' + esc(e.message) + '</div>'; }
+}
+
+function cliKpis(id){
+  const c = cliCtx[id] || { orcs:[], hists:[], peds:[] };
+  let proposto = 0, adjudicado = 0, nAdj = 0, nOrc = 0, perdido = 0; const datas = [];
+  c.orcs.forEach(o => { const v = Number(o.total) || 0; proposto += v; nOrc++; if (o.estado === 'Adjudicado') { adjudicado += v; nAdj++; } else if (o.estado === 'Perdido') perdido += v; if (o.data_envio) datas.push(o.data_envio); });
+  c.hists.forEach(h => { const v = Number(h.valor) || 0; proposto += v; nOrc++; const a = String(h.adjudicado || '').toLowerCase(); if (a.startsWith('s')) { adjudicado += v; nAdj++; } else if (a.startsWith('n')) perdido += v; if (h.data_envio) datas.push(h.data_envio); });
+  c.peds.forEach(p => { if (p.data) datas.push(p.data); });
+  return { proposto, adjudicado, nAdj, nOrc, emAberto: Math.max(0, proposto - adjudicado - perdido), taxa: nOrc ? Math.round(nAdj / nOrc * 100) : 0, ultimo: datas.length ? datas.sort().slice(-1)[0] : null };
+}
+
+function renderClientes(){
+  const w = $('cliWrap'); if (!w) return;
+  if (cliSel) { renderFichaCliente(w); return; }
+  const q = norm($('cliPesquisa') ? $('cliPesquisa').value : '');
+  let lista = clientesLista.map(c => ({ c, k: cliKpis(c.id) }));
+  if (q) lista = lista.filter(x => norm(x.c.nome).includes(q));
+  lista.sort((a, b) => b.k.proposto - a.k.proposto);
+  if (!lista.length) { w.innerHTML = '<div class="vazio" style="padding:40px">Nenhum cliente encontrado.</div>'; return; }
+  w.innerHTML = '<div style="font-size:12px;color:var(--cinza);margin-bottom:8px">' + lista.length + ' clientes</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px">' + lista.map(({ c, k }) =>
+    '<div onclick="abrirCliente(' + c.id + ')" style="background:#fff;border:1px solid var(--linha);border-radius:12px;padding:14px 16px;cursor:pointer">' +
+      '<div style="font-size:15px;font-weight:600;margin-bottom:2px">' + esc(c.nome) + '</div>' +
+      '<div style="font-size:12px;color:var(--cinza);margin-bottom:8px">' + esc(c.tipo || '—') + (c.zona ? ' · ' + esc(c.zona) : '') + '</div>' +
+      '<div style="font-size:19px;font-weight:700;color:var(--verde-escuro,#455F51)">' + fmtEur(k.proposto) + '</div>' +
+      '<div style="display:flex;gap:12px;margin-top:8px;font-size:12px;color:var(--cinza)">' +
+        '<span>' + k.nOrc + ' orç.</span><span>' + k.taxa + '% adj.</span>' + (k.ultimo ? '<span>' + fmtData(k.ultimo) + '</span>' : '') +
+      '</div></div>'
+  ).join('') + '</div>';
+}
+
+function abrirCliente(id){ cliSel = id; renderClientes(); }
+function voltarClientes(){ cliSel = null; renderClientes(); }
+
+function renderFichaCliente(w){
+  const c = clientesLista.find(x => x.id === cliSel); if (!c) { voltarClientes(); return; }
+  const k = cliKpis(c.id), ctx = cliCtx[c.id] || { orcs:[], hists:[], peds:[] }, cons = cliContactos[c.id] || [];
+  const info = [['Proposto', fmtEur(k.proposto)], ['Adjudicado', fmtEur(k.adjudicado)], ['Taxa', k.taxa + '% (' + k.nAdj + '/' + k.nOrc + ')'], ['Em aberto', fmtEur(k.emAberto)], ['Último contacto', k.ultimo ? fmtData(k.ultimo) : '—']];
+  const infoHTML = info.map(p => '<div><div style="font-size:11.5px;color:var(--cinza)">' + p[0] + '</div><div style="font-size:16px;font-weight:600">' + p[1] + '</div></div>').join('');
+  const contactosHTML = cons.length ? cons.map(p => '<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--linha)"><span>👤</span><div><div style="font-size:13px;font-weight:600">' + esc(p.nome || '(sem nome)') + '</div>' + (p.papel ? '<div style="font-size:12px;color:var(--cinza)">' + esc(p.papel) + '</div>' : '') + (p.email ? '<div style="font-size:12px;color:var(--verde,#4A7C29)">' + esc(p.email) + '</div>' : '') + '</div></div>').join('') : '<div style="font-size:12.5px;color:var(--cinza);padding-top:6px">Sem contactos registados.</div>';
+  const chipEst = e => { const m = { Adjudicado:'verde', Perdido:'terra', Enviado:'azul', 'Proposta enviada':'azul', 'Em análise':'ambar', 'No SharePoint':'roxo' }; return '<span class="chip ' + (m[e] || 'cinza') + '">' + esc(e || '—') + '</span>'; };
+  const linhas = ctx.orcs.map(o => ({ obra:o.nome_obra, val:Number(o.total)||0, est:o.estado, data:o.data_envio }))
+    .concat(ctx.hists.map(h => { const a = String(h.adjudicado||'').toLowerCase(); return { obra:h.nome, val:Number(h.valor)||0, est:(a.startsWith('s')?'Adjudicado':a.startsWith('n')?'Perdido':'Histórico'), data:h.data_envio }; }))
+    .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+  const orcsHTML = linhas.length ? '<table style="width:100%;border-collapse:collapse;font-size:13px">' + linhas.map(l => '<tr style="border-bottom:1px solid var(--linha)"><td style="padding:7px 4px">' + esc(l.obra || '—') + '</td><td style="padding:7px 4px;white-space:nowrap">' + fmtEur(l.val) + '</td><td style="padding:7px 4px">' + chipEst(l.est) + '</td></tr>').join('') + '</table>' : '<div style="font-size:12.5px;color:var(--cinza)">Sem orçamentos.</div>';
+  const evs = [];
+  ctx.orcs.forEach(o => { if (o.data_envio) evs.push({ d:o.data_envio, t:'📤 Orçamento ' + (o.estado || '') + ' — ' + (o.nome_obra || '') }); });
+  ctx.peds.forEach(p => { if (p.data) evs.push({ d:p.data, t:'📥 Pedido: ' + (p.pedido || '') }); });
+  evs.sort((a, b) => String(b.d).localeCompare(String(a.d)));
+  const tlHTML = evs.length ? evs.slice(0, 25).map(e => '<div style="display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--linha)"><span style="font-size:12px;color:var(--cinza);white-space:nowrap">' + fmtData(e.d) + '</span><span style="font-size:13px">' + esc(e.t) + '</span></div>').join('') : '<div style="font-size:12.5px;color:var(--cinza)">Sem atividade registada.</div>';
+  w.innerHTML =
+    '<button class="btn mini ghost" style="margin-bottom:12px" onclick="voltarClientes()">← Todos os clientes</button>' +
+    '<div style="font-size:20px;font-weight:700">' + esc(c.nome) + '</div>' +
+    '<div style="font-size:12.5px;color:var(--cinza);margin:2px 0 14px">' + esc(c.tipo || 'tipo por definir') + (c.zona ? ' · ' + esc(c.zona) : '') + '</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;background:var(--verde-suave,#F0F4EE);border-radius:8px;padding:12px 14px;margin-bottom:16px">' + infoHTML + '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">' +
+      '<div><div style="font-size:13px;font-weight:600;margin-bottom:2px">Contactos</div>' + contactosHTML + '</div>' +
+      '<div><div style="font-size:13px;font-weight:600;margin-bottom:6px">Orçamentos e obras</div>' + orcsHTML + '</div>' +
+    '</div>' +
+    '<div style="font-size:13px;font-weight:600;margin:18px 0 2px">Atividade</div>' + tlHTML;
+}
+
 mudarTab('pipeline');
 carregarEquipa();
 carregarPrecos();
@@ -5470,6 +5570,7 @@ carregarOrcamentos();
 carregarHistoricoAntigo();
 carregarPastasSharePoint();
 carregarGI();
+carregarClientes();
 </script>
 </body>
 </html>
