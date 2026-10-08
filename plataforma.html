@@ -408,6 +408,7 @@ th .si{opacity:.45;font-size:10px}
     <button class="tab" data-tab="clientes" onclick="mudarTab('clientes')">Clientes</button>
     <button class="tab" data-tab="parceiros" onclick="mudarTab('parceiros')">Parceiros</button>
   </nav>
+  <button id="btnTutorial" class="link-plataforma" onclick="abrirTutorial()" title="Como funciona a plataforma" style="cursor:pointer;font-family:inherit;font-size:12.5px">❓ Tutorial</button>
   <div id="precosChip"><span class="ponto"></span><span id="precosTexto">Tabela de preços: a carregar…</span><button onclick="carregarPrecos()" title="Recarregar do SharePoint">↻</button></div>
 </header>
 
@@ -901,7 +902,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-10-08c'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-10-08d'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -974,6 +975,79 @@ async function db(base, caminho, opts = {}){
   if (!r.ok) throw new Error('HTTP ' + r.status + ' — ' + (await r.text()).slice(0, 300));
   const txt = await r.text();
   return txt ? JSON.parse(txt) : null;
+}
+
+/* ============================================================
+   Tutorial — explica toda a plataforma
+   ============================================================ */
+const TUTORIAL_SECOES = [
+  { e:'🌱', bg:'#E8F0EA', fg:'#1F4D2E', t:'Visão geral', p:[
+    'A plataforma organiza toda a atividade comercial à volta do <b>cliente</b> — do email que chega até à obra adjudicada.',
+    'No topo há cinco separadores (Pipeline · Orçamentação · Histórico · Clientes · Parceiros) e várias automações a correr em segundo plano.',
+  ]},
+  { e:'📥', bg:'#FAEEDA', fg:'#854F0B', t:'Pipeline — os pedidos que entram', p:[
+    'Os pedidos de orçamento aparecem <b>sozinhos</b>: a triagem lê a caixa orcamentos@ de poucos em poucos minutos e cria aqui cada pedido.',
+    'Os sub-separadores separam o trabalho: <b>Não Iniciados</b> · <b>Em curso</b> · <b>Enviados</b>. «Para rever» = casos duvidosos; «Fora de Zona» = fora da área.',
+    'Passa o rato numa linha para ver 👁️ o <b>email original</b> e 📊 o <b>Excel</b> do orçamento enviado.',
+    'Cada pedido é ligado automaticamente ao cliente e marcado no <b>Outlook</b> com a categoria do estado (Na Plataforma, Em Curso, Fora de Zona…).',
+  ]},
+  { e:'🧮', bg:'#EEEDFE', fg:'#3C3489', t:'Orçamentação — preparar a proposta', p:[
+    'Abre um pedido para criar o orçamento. A <b>tabela de preços</b> é lida ao vivo do SharePoint (o chip no canto superior direito mostra o estado).',
+    'Ao criar a pasta, o orçamento recebe o código <b>ocWG26_XXX</b> — também no nome do ficheiro Excel.',
+    'O <b>logótipo</b> da We Garden entra no Excel: ao carregar, surge um pop-up para escolheres a célula onde fica.',
+  ]},
+  { e:'🗂️', bg:'#E1F5EE', fg:'#085041', t:'Histórico — obras passadas e seguimento', p:[
+    'Todas as obras com o seu progresso/estado. Ao marcar «Não Adjudicado» regista-se a <b>razão da perda</b> (preço, prazo, concorrente…).',
+    'Dashboard <b>«Obras de Grande Interesse»</b>: escolhes à mão as obras enviadas que queres acompanhar de perto, com timeline.',
+  ]},
+  { e:'👤', bg:'#E8F0EA', fg:'#1F4D2E', t:'Clientes — a ficha 360', p:[
+    'Cada cliente tem ficha completa: contactos, orçamentos, obras e uma <b>timeline</b> de tudo o que aconteceu.',
+    'Agendas <b>follow-ups</b> (próxima ação); quando está feito, carregas «✓ marcar feito» e sai da lista e do email de lembrete.',
+    'Vista <b>📊 Análise</b>: previsão de faturação ponderada, taxa de ganho, clientes «🔥 a reaquecer» (sem contacto há mais de 6 meses) e razões de perda.',
+  ]},
+  { e:'🤝', bg:'#FAEEDA', fg:'#854F0B', t:'Parceiros — quem referencia e fornece', p:[
+    'Fornecedores e referenciadores (ex.: Landlab). Vês o <b>ROI</b> de cada parceiro: negócio gerado pelos clientes que referenciou.',
+    'Na ficha de um cliente, o campo «Referenciado por» liga-o ao parceiro.',
+  ]},
+  { e:'🔔', bg:'#F1EFE8', fg:'#444441', t:'Automações em segundo plano', p:[
+    'Triagem de emails de poucos em poucos minutos + <b>resumo diário</b> por email de manhã.',
+    'Lembrete diário dos <b>follow-ups de cliente</b> por fazer.',
+    'Associação automática de cada pedido ao <b>cliente certo</b> (pelo domínio do email).',
+  ]},
+];
+function abrirTutorial(){
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(20,26,18,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px';
+  const secoes = TUTORIAL_SECOES.map(s =>
+    '<div style="display:flex;gap:12px;padding:14px 0;border-top:1px solid var(--linha)">' +
+      '<span style="flex:none;width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;background:' + s.bg + '">' + s.e + '</span>' +
+      '<div style="flex:1">' +
+        '<div style="font-size:14.5px;font-weight:700;color:' + s.fg + ';margin:3px 0 5px">' + s.t + '</div>' +
+        s.p.map(x => '<div style="font-size:13px;color:#3a3d36;line-height:1.5;margin-bottom:4px">' + x + '</div>').join('') +
+      '</div>' +
+    '</div>').join('');
+  ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:720px;width:100%;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 14px 50px rgba(0,0,0,.3);overflow:hidden">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;background:var(--verde);color:#fff">' +
+      '<div><div style="font-size:17px;font-weight:700">Como funciona a plataforma</div>' +
+      '<div style="font-size:12px;opacity:.85;margin-top:2px">Um guia rápido de todas as áreas</div></div>' +
+      '<button id="tutX" title="Fechar" style="background:rgba(255,255,255,.18);border:none;color:#fff;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;line-height:1">✕</button>' +
+    '</div>' +
+    '<div style="padding:4px 22px 16px;overflow-y:auto">' + secoes +
+      '<div style="margin-top:14px;padding:11px 13px;background:var(--verde-suave);border-radius:9px;font-size:12px;color:var(--cinza);line-height:1.5">' +
+        '💡 Os dados atualizam-se sozinhos. Se algo parecer desatualizado, abre numa janela privada — a cache do browser é agressiva.' +
+      '</div>' +
+    '</div>' +
+    '<div style="padding:12px 22px;border-top:1px solid var(--linha);text-align:right">' +
+      '<button class="btn mini primario" id="tutOk">Percebi</button>' +
+    '</div>' +
+  '</div>';
+  document.body.appendChild(ov);
+  const fechar = () => { try { document.body.removeChild(ov); } catch (e) {} document.removeEventListener('keydown', onEsc); };
+  const onEsc = (ev) => { if (ev.key === 'Escape') fechar(); };
+  ov.querySelector('#tutX').onclick = fechar;
+  ov.querySelector('#tutOk').onclick = fechar;
+  ov.onclick = (ev) => { if (ev.target === ov) fechar(); };
+  document.addEventListener('keydown', onEsc);
 }
 
 /* ============================================================
