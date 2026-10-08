@@ -901,7 +901,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-10-08b'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-10-08c'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -5650,7 +5650,7 @@ function renderFichaCliente(w){
   const infoHTML = info.map(p => '<div><div style="font-size:11.5px;color:var(--cinza)">' + p[0] + '</div><div style="font-size:16px;font-weight:600">' + p[1] + '</div></div>').join('');
   // próxima ação = follow-up futuro mais próximo
   const hoje = new Date().toISOString().slice(0,10);
-  const fut = (ctx.eventos || []).filter(e => e.tipo === 'followup' && e.data && e.data >= hoje).sort((a,b) => a.data < b.data ? -1 : 1)[0];
+  const fut = (ctx.eventos || []).filter(e => e.tipo === 'followup' && !e.done && e.data && e.data >= hoje).sort((a,b) => a.data < b.data ? -1 : 1)[0];
   const proxHTML = '<div style="background:#eaf1fb;border-radius:8px;padding:10px 12px;margin-bottom:12px"><div style="font-size:12px;color:var(--cinza)">Próxima ação</div>' + (fut ? '<div style="font-size:14px;font-weight:600">⏰ ' + fmtData(fut.data) + ' — ' + esc(fut.titulo || '') + '</div>' : '<div style="font-size:13px;color:var(--cinza)">Sem ação agendada — regista um follow-up na timeline.</div>') + '</div>';
   // contactos editáveis
   const contactosHTML = (cons.length ? cons.map(p => '<div style="display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--linha)"><span>👤</span><div style="flex:1"><div style="font-size:13px;font-weight:600">' + esc(p.nome || '(sem nome)') + (p.papel ? ' <span style="font-weight:400;color:var(--cinza)">· ' + esc(p.papel) + '</span>' : '') + '</div>' + (p.email ? '<div style="font-size:12px;color:var(--verde,#4A7C29)">' + esc(p.email) + '</div>' : '') + (p.telefone ? '<div style="font-size:12px;color:var(--cinza)">' + esc(p.telefone) + '</div>' : '') + '</div><a href="#" onclick="cliApagarContacto(' + p.id + ');return false" title="Apagar contacto" style="color:var(--cinza);text-decoration:none">✕</a></div>').join('') : '<div style="font-size:12.5px;color:var(--cinza);padding-top:6px">Sem contactos.</div>') +
@@ -5666,13 +5666,14 @@ function renderFichaCliente(w){
   const orcsHTML = linhas.length ? '<table style="width:100%;border-collapse:collapse;font-size:13px">' + linhas.map(l => '<tr style="border-bottom:1px solid var(--linha)"><td style="padding:7px 4px">' + esc(l.obra || '—') + '</td><td style="padding:7px 4px;white-space:nowrap">' + fmtEur(l.val) + '</td><td style="padding:7px 4px">' + chipEst(l.est) + '</td></tr>').join('') + '</table>' : '<div style="font-size:12.5px;color:var(--cinza)">Sem orçamentos.</div>';
   // timeline unificada: manual (editável) + derivados (orçamentos/pedidos)
   const evs = [];
-  (ctx.eventos || []).forEach(e => evs.push({ d:e.data||'', manual:true, id:e.id, tipo:e.tipo, titulo:e.titulo, detalhe:e.detalhe, autor:e.autor }));
+  (ctx.eventos || []).forEach(e => evs.push({ d:e.data||'', manual:true, id:e.id, tipo:e.tipo, titulo:e.titulo, detalhe:e.detalhe, autor:e.autor, done:e.done }));
   ctx.orcs.forEach(o => { if (o.data_envio) evs.push({ d:o.data_envio, tipo:'_orc', titulo:'Orçamento ' + (o.estado||'') + ' — ' + (o.nome_obra||'') }); });
   ctx.peds.forEach(p => { if (p.data) evs.push({ d:p.data, tipo:'_ped', titulo:'Pedido: ' + (p.pedido||'') }); });
   evs.sort((a, b) => String(b.d).localeCompare(String(a.d)));
   const evHTML = evs.length ? evs.map(e => {
     if (e.manual) { const t = GI_TIPOS[e.tipo] || GI_TIPOS.nota;
-      return '<div style="display:flex;gap:10px;padding:9px 0;border-top:1px solid var(--linha)"><span style="align-self:flex-start;white-space:nowrap;font-size:12px;padding:3px 9px;border-radius:999px;background:' + t.bg + ';color:' + t.fg + '">' + t.e + ' ' + t.l + '</span><div style="flex:1"><div style="font-size:13px;font-weight:600">' + esc(e.titulo||'') + ' <a href="#" onclick="cliApagarEvento(' + e.id + ');return false" style="color:var(--cinza);text-decoration:none;font-weight:400">✕</a></div>' + (e.detalhe ? '<div style="font-size:12.5px;color:var(--cinza)">' + esc(e.detalhe) + '</div>' : '') + '<div style="font-size:11.5px;color:var(--cinza);margin-top:2px">' + (e.autor ? esc(e.autor) + ' · ' : '') + (e.d ? fmtData(e.d) : 'sem data') + '</div></div></div>';
+      const feito = e.tipo === 'followup' ? (e.done ? ' <span style="color:#2f7d32;font-weight:400">✓ feito</span>' : ' <a href="#" onclick="cliMarcarFeito(' + e.id + ');return false" style="color:#2f7d32;text-decoration:none;font-weight:400">✓ marcar feito</a>') : '';
+      return '<div style="display:flex;gap:10px;padding:9px 0;border-top:1px solid var(--linha)' + (e.done ? ';opacity:.55' : '') + '"><span style="align-self:flex-start;white-space:nowrap;font-size:12px;padding:3px 9px;border-radius:999px;background:' + t.bg + ';color:' + t.fg + '">' + t.e + ' ' + t.l + '</span><div style="flex:1"><div style="font-size:13px;font-weight:600">' + esc(e.titulo||'') + feito + ' <a href="#" onclick="cliApagarEvento(' + e.id + ');return false" style="color:var(--cinza);text-decoration:none;font-weight:400">✕</a></div>' + (e.detalhe ? '<div style="font-size:12.5px;color:var(--cinza)">' + esc(e.detalhe) + '</div>' : '') + '<div style="font-size:11.5px;color:var(--cinza);margin-top:2px">' + (e.autor ? esc(e.autor) + ' · ' : '') + (e.d ? fmtData(e.d) : 'sem data') + '</div></div></div>';
     }
     const ic = e.tipo === '_orc' ? '📤' : '📥';
     return '<div style="display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--linha)"><span style="font-size:12px;color:var(--cinza);white-space:nowrap">' + (e.d ? fmtData(e.d) : '—') + '</span><span style="font-size:13px;color:var(--cinza)">' + ic + ' ' + esc(e.titulo||'') + '</span></div>';
@@ -5732,6 +5733,11 @@ async function cliApagarEvento(id){
   if (!confirm('Apagar esta entrada da timeline?')) return;
   try { await db(NOVO, 'cliente_eventos?id=eq.' + id, { method:'DELETE', headers:{ Prefer:'return=minimal' } });
     const ctx = cliCtx[cliSel]; if (ctx) ctx.eventos = ctx.eventos.filter(x => x.id !== id); renderClientes();
+  } catch (e) { toast('Erro: ' + e.message, 'erro'); }
+}
+async function cliMarcarFeito(id){
+  try { await db(NOVO, 'cliente_eventos?id=eq.' + id, { method:'PATCH', headers:{ Prefer:'return=minimal' }, body: JSON.stringify({ done:true }) });
+    const ctx = cliCtx[cliSel]; if (ctx) { const e = (ctx.eventos||[]).find(x => x.id === id); if (e) e.done = true; } toast('Follow-up concluído'); renderClientes();
   } catch (e) { toast('Erro: ' + e.message, 'erro'); }
 }
 
