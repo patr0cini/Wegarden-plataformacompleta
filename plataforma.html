@@ -614,6 +614,10 @@ th .si{opacity:.45;font-size:10px}
     <div class="painel-topo">
       <div><h2>Clientes</h2><p>Tudo sobre cada cliente — orçamentos, contactos e atividade.</p></div>
     </div>
+    <div style="display:flex;gap:6px;margin-bottom:12px">
+      <button class="btn mini primario" id="cliVistaLista" onclick="mudarVistaCli('lista')">Clientes</button>
+      <button class="btn mini ghost" id="cliVistaAnalise" onclick="mudarVistaCli('analise')">📊 Análise</button>
+    </div>
     <input type="text" id="cliPesquisa" placeholder="Procurar cliente por nome…" oninput="renderClientes()" style="width:100%;max-width:360px;padding:8px 12px;border:1px solid var(--linha);border-radius:8px;font-size:13px;margin-bottom:14px">
     <div id="cliWrap"><div class="vazio" style="padding:40px">A carregar clientes…</div></div>
   </section>
@@ -897,7 +901,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-10-08a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-10-08b'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -4602,11 +4606,36 @@ function selProgressoHist(idx, it){
     ops.map(o => '<option' + (o === atual ? ' selected' : '') + '>' + esc(o) + '</option>').join('') + '</select>';
 }
 
+const MOTIVOS_PERDA = ['Preço', 'Prazo', 'Concorrente', 'Projeto adiado', 'Projeto cancelado', 'Sem resposta do cliente', 'Fora de âmbito / zona', 'Outro'];
+function pedirMotivoPerda(it){
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:9999';
+  ov.innerHTML = '<div style="background:#fff;border-radius:12px;padding:20px 22px;max-width:390px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,.25)">' +
+    '<div style="font-size:15px;font-weight:700;margin-bottom:6px">Razão da perda</div>' +
+    '<div style="font-size:12.5px;color:#555;margin-bottom:10px">' + esc(it.codigo || it.obra || '') + '</div>' +
+    '<select id="mpSel" style="width:100%;margin-bottom:8px">' + MOTIVOS_PERDA.map(m => '<option>' + m + '</option>').join('') + '</select>' +
+    '<input id="mpNota" placeholder="Detalhe (opcional, ex.: −8% concorrente)" style="width:100%;margin-bottom:10px">' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn mini ghost" id="mpSkip">Saltar</button><button class="btn mini primario" id="mpOk">Guardar</button></div></div>';
+  document.body.appendChild(ov);
+  const fechar = () => { try { document.body.removeChild(ov); } catch (e) {} };
+  ov.querySelector('#mpSkip').onclick = fechar;
+  ov.querySelector('#mpOk').onclick = async () => {
+    const nota = ov.querySelector('#mpNota').value.trim();
+    const motivo = ov.querySelector('#mpSel').value + (nota ? ' — ' + nota : '');
+    try {
+      if (it.antigo) await db(NOVO, 'historico?id=eq.' + encodeURIComponent(it.idOrig), { method:'PATCH', headers:{ Prefer:'return=minimal' }, body: JSON.stringify({ motivo_perda: motivo }) });
+      else await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(it.codigo), { method:'PATCH', headers:{ Prefer:'return=minimal' }, body: JSON.stringify({ motivo_perda: motivo }) });
+      toast('Razão da perda guardada');
+    } catch (e) { toast('Erro: ' + e.message, 'erro'); }
+    fechar();
+  };
+}
 async function histProgresso(idx, valor){
   const it = histLista[idx];
   if (!it) return;
   if (valor === 'Verificar' || valor === 'Corrigir') { abrirAtribuicao(idx, valor); return; }
   await gravarProgresso(idx, valor, null);
+  if (valor === 'Não Adjudicado' && !it.soSharePoint) pedirMotivoPerda(it);
 }
 async function gravarProgresso(idx, valor, lemb){
   const it = histLista[idx];
@@ -5500,8 +5529,8 @@ async function carregarClientes(){
     cliContactos = {};
     (cons || []).forEach(c => { (cliContactos[c.cliente_id] = cliContactos[c.cliente_id] || []).push(c); });
     const [ocs, hts, pds] = await Promise.all([
-      db(NOVO, 'orcamentos_v2?select=id,cliente_id,nome_obra,total,estado,data_envio,progresso,concurso&cliente_id=not.is.null'),
-      db(NOVO, 'historico?select=id,cliente_id,nome,valor,ano,adjudicado,data_envio,mes&cliente_id=not.is.null'),
+      db(NOVO, 'orcamentos_v2?select=id,cliente_id,nome_obra,total,estado,data_envio,progresso,concurso,motivo_perda&cliente_id=not.is.null'),
+      db(NOVO, 'historico?select=id,cliente_id,nome,valor,ano,adjudicado,data_envio,mes,motivo_perda&cliente_id=not.is.null'),
       db(PIPELINE, 'pedidos?select=id,cliente_id,pedido,estado,data,localizacao&cliente_id=not.is.null')
     ]);
     const evs = await db(NOVO, 'cliente_eventos?select=*&order=data.desc.nullslast,id.desc') || [];
@@ -5521,11 +5550,20 @@ function cliKpis(id){
   c.orcs.forEach(o => { const v = Number(o.total) || 0; proposto += v; nOrc++; if (o.estado === 'Adjudicado') { adjudicado += v; nAdj++; } else if (o.estado === 'Perdido') perdido += v; if (o.data_envio) datas.push(o.data_envio); });
   c.hists.forEach(h => { const v = Number(h.valor) || 0; proposto += v; nOrc++; const a = String(h.adjudicado || '').toLowerCase(); if (a.startsWith('s')) { adjudicado += v; nAdj++; } else if (a.startsWith('n')) perdido += v; if (h.data_envio) datas.push(h.data_envio); });
   c.peds.forEach(p => { if (p.data) datas.push(p.data); });
-  return { proposto, adjudicado, nAdj, nOrc, emAberto: Math.max(0, proposto - adjudicado - perdido), taxa: nOrc ? Math.round(nAdj / nOrc * 100) : 0, ultimo: datas.length ? datas.sort().slice(-1)[0] : null };
+  return { proposto, adjudicado, perdido, nAdj, nOrc, emAberto: Math.max(0, proposto - adjudicado - perdido), taxa: nOrc ? Math.round(nAdj / nOrc * 100) : 0, ultimo: datas.length ? datas.sort().slice(-1)[0] : null };
 }
 
+let cliVista = 'lista';
+function mudarVistaCli(v){
+  cliVista = v; cliSel = null;
+  $('cliVistaLista').className = 'btn mini' + (v === 'lista' ? ' primario' : ' ghost');
+  $('cliVistaAnalise').className = 'btn mini' + (v === 'analise' ? ' primario' : ' ghost');
+  const ps = $('cliPesquisa'); if (ps) ps.style.display = v === 'lista' ? '' : 'none';
+  renderClientes();
+}
 function renderClientes(){
   const w = $('cliWrap'); if (!w) return;
+  if (cliVista === 'analise') { renderAnalise(w); return; }
   if (cliSel) { renderFichaCliente(w); return; }
   const q = norm($('cliPesquisa') ? $('cliPesquisa').value : '');
   let lista = clientesLista.map(c => ({ c, k: cliKpis(c.id) }));
@@ -5544,8 +5582,43 @@ function renderClientes(){
   ).join('') + '</div>';
 }
 
-function abrirCliente(id){ cliSel = id; renderClientes(); }
+function abrirCliente(id){ cliVista = 'lista'; cliSel = id; renderClientes(); }
 function voltarClientes(){ cliSel = null; renderClientes(); }
+
+function renderAnalise(w){
+  const PROB = { 'Proposta enviada':.4, 'Enviado':.4, 'Em análise':.25, 'Em revisão':.25, 'No SharePoint':.1, 'Rascunho':.05, 'Não iniciado':.05 };
+  let forecast = 0, adjTot = 0, perdTot = 0, nAdjTot = 0, nPerdTot = 0;
+  const reaquecer = [], porTipo = {}, motivos = {};
+  const corte = new Date(Date.now() - 180*24*3600*1000).toISOString().slice(0,10);
+  clientesLista.forEach(c => {
+    const k = cliKpis(c.id);
+    adjTot += k.adjudicado; perdTot += k.perdido; nAdjTot += k.nAdj;
+    const tp = c.tipo || 'Por definir'; (porTipo[tp] = porTipo[tp] || { n:0, total:0 }); porTipo[tp].n++; porTipo[tp].total += k.proposto;
+    if (k.ultimo && k.ultimo < corte && k.proposto > 0) reaquecer.push({ nome:c.nome, id:c.id, total:k.proposto, ultimo:k.ultimo });
+    const ctx = cliCtx[c.id] || { orcs:[], hists:[] };
+    ctx.orcs.forEach(o => { if (o.estado !== 'Adjudicado' && o.estado !== 'Perdido') forecast += (Number(o.total)||0) * (PROB[o.estado] || 0); if (o.estado === 'Perdido') { nPerdTot++; if (o.motivo_perda) { const m = o.motivo_perda.split(' — ')[0]; motivos[m] = (motivos[m]||0) + 1; } } });
+    ctx.hists.forEach(h => { const a = String(h.adjudicado||'').toLowerCase(); if (a.startsWith('n')) { nPerdTot++; if (h.motivo_perda) { const m = h.motivo_perda.split(' — ')[0]; motivos[m] = (motivos[m]||0) + 1; } } });
+  });
+  reaquecer.sort((a,b) => b.total - a.total);
+  const taxaG = (nAdjTot+nPerdTot) ? Math.round(nAdjTot/(nAdjTot+nPerdTot)*100) : 0;
+  const tile = (l,v,s) => '<div style="background:#fff;border:1px solid var(--linha);border-radius:10px;padding:12px 14px"><div style="font-size:11.5px;color:var(--cinza)">' + l + '</div><div style="font-size:20px;font-weight:700">' + v + '</div>' + (s ? '<div style="font-size:11.5px;color:var(--cinza)">' + s + '</div>' : '') + '</div>';
+  const tipoRows = Object.entries(porTipo).sort((a,b) => b[1].total - a[1].total).map(([t,d]) => '<tr style="border-bottom:1px solid var(--linha)"><td style="padding:6px 4px">' + esc(t) + '</td><td style="padding:6px 4px;text-align:right">' + d.n + '</td><td style="padding:6px 4px;text-align:right;white-space:nowrap">' + fmtEur(d.total) + '</td></tr>').join('');
+  const reaqRows = reaquecer.slice(0,12).map(r => '<tr style="border-bottom:1px solid var(--linha);cursor:pointer" onclick="abrirCliente(' + r.id + ')"><td style="padding:6px 4px">' + esc(r.nome) + '</td><td style="padding:6px 4px;white-space:nowrap">' + fmtEur(r.total) + '</td><td style="padding:6px 4px;color:var(--cinza);white-space:nowrap">' + fmtData(r.ultimo) + '</td></tr>').join('') || '<tr><td style="padding:8px 4px;color:var(--cinza)">Nenhum cliente parado há mais de 6 meses.</td></tr>';
+  const motEntries = Object.entries(motivos).sort((a,b) => b[1] - a[1]);
+  const motHTML = motEntries.length ? motEntries.map(([m,n]) => '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--linha);font-size:13px"><span>' + esc(m) + '</span><span style="font-weight:600">' + n + '</span></div>').join('') : '<div style="font-size:12.5px;color:var(--cinza)">Ainda sem razões de perda registadas. Aparecem quando marcas «Não Adjudicado» no histórico.</div>';
+  w.innerHTML =
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px">' +
+      tile('Forecast ponderado', fmtEur(forecast), 'pipeline em aberto × probabilidade') +
+      tile('Adjudicado', fmtEur(adjTot), nAdjTot + ' obras') +
+      tile('Perdido', fmtEur(perdTot), nPerdTot + ' obras') +
+      tile('Taxa de ganho', taxaG + '%', 'ganhos / (ganhos+perdas)') +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">' +
+      '<div><div style="font-size:13px;font-weight:600;margin-bottom:4px">🔥 A reaquecer (sem contacto há >6 meses)</div><table style="width:100%;border-collapse:collapse;font-size:13px">' + reaqRows + '</table></div>' +
+      '<div><div style="font-size:13px;font-weight:600;margin-bottom:4px">Por tipo de cliente</div><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="color:var(--cinza);font-size:11.5px"><th style="text-align:left;padding:0 4px">Tipo</th><th style="text-align:right;padding:0 4px">Nº</th><th style="text-align:right;padding:0 4px">Proposto</th></tr></thead>' + tipoRows + '</table></div>' +
+    '</div>' +
+    '<div style="font-size:13px;font-weight:600;margin:20px 0 4px">Razões de perda</div>' + motHTML;
+}
 
 // Fase 2 — ficha editável: info + contactos + timeline + próxima ação
 const CLI_ORDEM = ['followup','email','negociacao','conversa','visita','nota'];
