@@ -427,6 +427,9 @@ body.consultor .ro-hide{display:none!important}
         <h2>Histórico e follow-ups</h2>
         <p>Orçamentos enviados, adjudicados e perdidos.</p>
       </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn ghost" onclick="exportarHistoricoExcel()" title="Exporta o histórico para Excel (respeita os filtros aplicados)">⬇ Excel</button>
+      </div>
     </div>
     <div style="display:flex;gap:6px;margin-bottom:10px">
       <button class="btn mini primario" id="histVistaLista" onclick="mudarVistaHist('lista')">Histórico</button>
@@ -758,7 +761,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-10-08e-consultor'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-10-09a-consultor'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -4267,6 +4270,34 @@ function anoDoRegisto(it){
   return '2026';
 }
 
+function exportarHistoricoExcel(){
+  const lista = Array.isArray(histLista) ? histLista : [];
+  if (!lista.length) { toast('Nada para exportar — ajusta os filtros.', 'erro'); return; }
+  if (typeof XLSX === 'undefined') { toast('Biblioteca Excel ainda a carregar — tenta de novo.', 'erro'); return; }
+  const dataISO = it => (it.sortKey && /^\d{4}-\d{2}-\d{2}/.test(it.sortKey)) ? it.sortKey.slice(0, 10) : (it.dataTxt || '');
+  const rows = lista.map(it => ({
+    'Código': it.codigo || '',
+    'Progresso': progressoEfetivo(it) || '',
+    'Estado': it.estado || '',
+    'Obra': it.obra || '',
+    'Requerente': it.cliente || '',
+    'Responsável': it.responsavel || '',
+    'Total (€)': Number(it.total) || 0,
+    'Interesse': (grauDe(it).label || ''),
+    'Concurso': it.concurso || '',
+    'Visita': it.visita || '',
+    'Arranque': it.arranque || '',
+    'Enviado em': dataISO(it),
+    'Ano': anoDoRegisto(it) || '',
+    'Follow-ups': it.followups ? it.followups.length : 0
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{wch:13},{wch:16},{wch:15},{wch:44},{wch:24},{wch:13},{wch:14},{wch:11},{wch:9},{wch:8},{wch:12},{wch:13},{wch:6},{wch:10}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Histórico');
+  XLSX.writeFile(wb, 'WeGarden_Historico_' + new Date().toISOString().slice(0, 10) + '.xlsx');
+  toast(lista.length + ' linha' + (lista.length !== 1 ? 's' : '') + ' exportada' + (lista.length !== 1 ? 's' : '') + ' para Excel');
+}
 function renderHistorico(){
   const q = norm($('histPesquisa').value);
   const fa = $('histAno').value;
