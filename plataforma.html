@@ -469,6 +469,11 @@ th .si{opacity:.45;font-size:10px}
         </div>
         <button class="btn primario" onclick="novoOrcamento()">+ Novo orçamento</button>
       </div>
+      <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
+        <button class="btn mini primario" id="orcVistaRasc" onclick="mudarVistaOrc('rasc')">✏️ Em curso <span id="orcNRasc"></span></button>
+        <button class="btn mini ghost" id="orcVistaEnv" onclick="mudarVistaOrc('env')">📤 Enviados <span id="orcNEnv"></span></button>
+        <input type="text" id="orcPesquisa" placeholder="Pesquisar código, obra, cliente…" oninput="renderOrcamentos()" style="margin-left:auto;min-width:260px;padding:7px 11px;border:1px solid var(--linha);border-radius:8px;font-size:13px">
+      </div>
       <div class="tabela-wrap">
         <table>
           <thead><tr>
@@ -906,7 +911,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-10-09a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-10-26a'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -2651,8 +2656,31 @@ function chipOrc(estado){
   return '<span class="chip ' + (m[estado] || 'cinza') + '">' + esc(estado || '—') + '</span>';
 }
 
+// Orçamentação: «Em curso» (rascunhos/em revisão) separado de «Enviados» (enviado/adjudicado/perdido)
+let orcVista = 'rasc';
+const ORC_ENVIADOS = new Set(['Enviado', 'Adjudicado', 'Perdido']);
+function mudarVistaOrc(v){
+  orcVista = v;
+  $('orcVistaRasc').className = 'btn mini' + (v === 'rasc' ? ' primario' : ' ghost');
+  $('orcVistaEnv').className = 'btn mini' + (v === 'env' ? ' primario' : ' ghost');
+  renderOrcamentos();
+}
 function renderOrcamentos(){
-  $('orcCorpo').innerHTML = orcamentos.length ? orcamentos.map(o =>
+  if (!$('orcCorpo')) return;
+  const q = norm(($('orcPesquisa') && $('orcPesquisa').value) || '');
+  const casa = o => !q || norm([o.id, o.nome_obra, o.cliente, o.pedido_id].join(' ')).includes(q);
+  const filtrados = orcamentos.filter(casa);
+  const env = filtrados.filter(o => ORC_ENVIADOS.has(o.estado));
+  const rasc = filtrados.filter(o => !ORC_ENVIADOS.has(o.estado));
+  if ($('orcNRasc')) $('orcNRasc').textContent = '(' + rasc.length + ')';
+  if ($('orcNEnv')) $('orcNEnv').textContent = '(' + env.length + ')';
+  const lista = orcVista === 'env'
+    ? env.slice().sort((a, b) => String(b.data_envio || b.atualizado_em || '').localeCompare(String(a.data_envio || a.atualizado_em || '')))
+    : rasc;
+  const vazio = q ? 'Nada encontrado para «' + esc($('orcPesquisa').value) + '» neste separador.'
+    : orcVista === 'env' ? 'Ainda sem orçamentos enviados.'
+    : (orcamentos.length ? 'Sem rascunhos em curso — os enviados estão no separador «📤 Enviados».' : 'Ainda sem orçamentos. Cria o primeiro ou começa a partir de um pedido na Pipeline.');
+  $('orcCorpo').innerHTML = lista.length ? lista.map(o =>
     '<tr class="clicavel" onclick="abrirOrcamento(\'' + esc(o.id).replace(/'/g, "\\'") + '\')">' +
     '<td><b>' + esc(o.id) + '</b></td>' +
     '<td>' + esc(o.nome_obra || '—') + '</td>' +
@@ -2662,7 +2690,7 @@ function renderOrcamentos(){
     '<td>' + fmtData(o.atualizado_em) + '</td>' +
     '<td onclick="event.stopPropagation()"><button class="btn perigo" title="Apagar" onclick="apagarOrcamento(\'' + esc(o.id).replace(/'/g, "\\'") + '\')">✕</button></td>' +
     '</tr>'
-  ).join('') : '<tr><td colspan="7" class="vazio">Ainda sem orçamentos. Cria o primeiro ou começa a partir de um pedido na Pipeline.</td></tr>';
+  ).join('') : '<tr><td colspan="7" class="vazio">' + vazio + '</td></tr>';
 }
 
 async function apagarOrcamento(id){
