@@ -477,7 +477,12 @@ th .si{opacity:.45;font-size:10px}
       <div class="tabela-wrap">
         <table>
           <thead><tr>
-            <th>Código</th><th>Obra</th><th>Cliente</th><th>Estado</th><th class="num">Total</th><th>Actualizado</th><th></th>
+            <th class="ordenavel" onclick="orcSort('codigo')" title="Ordenar pela numeração do código">Código <span class="si" id="orcSi_codigo">↕</span></th>
+            <th class="ordenavel" onclick="orcSort('obra')">Obra <span class="si" id="orcSi_obra">↕</span></th>
+            <th class="ordenavel" onclick="orcSort('cliente')">Cliente <span class="si" id="orcSi_cliente">↕</span></th>
+            <th class="ordenavel" onclick="orcSort('estado')">Estado <span class="si" id="orcSi_estado">↕</span></th>
+            <th class="ordenavel num" onclick="orcSort('total')">Total <span class="si" id="orcSi_total">↕</span></th>
+            <th class="ordenavel" onclick="orcSort('atualizado')">Actualizado <span class="si" id="orcSi_atualizado">↕</span></th><th></th>
           </tr></thead>
           <tbody id="orcCorpo"><tr><td colspan="7" class="vazio">A carregar…</td></tr></tbody>
         </table>
@@ -923,7 +928,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-10-26g'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-10-26h'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -2689,6 +2694,26 @@ function mudarVistaOrc(v){
   $('orcVistaEnv').className = 'btn mini' + (v === 'env' ? ' primario' : ' ghost');
   renderOrcamentos();
 }
+// Ordenação da lista (clique no cabeçalho; 2.º clique inverte). Código = pela numeração (ano + nº).
+let orcOrd = { col: null, asc: true };
+function orcSort(col){
+  if (orcOrd.col === col) orcOrd.asc = !orcOrd.asc;
+  else { orcOrd.col = col; orcOrd.asc = !['total', 'atualizado'].includes(col); }
+  renderOrcamentos();
+}
+function numCodigo(id){ const m = String(id || '').match(/ocWG(\d{2})_(\d{1,4})/i); return m ? (+m[1]) * 10000 + (+m[2]) : null; }
+function orcOrdenar(lista){
+  if (!orcOrd.col) return lista;
+  const chave = { codigo: o => numCodigo(o.id), obra: o => norm(o.nome_obra || ''), cliente: o => norm(o.cliente || ''),
+                  estado: o => estadoReal(o), total: o => Number(o.total) || 0, atualizado: o => o.atualizado_em || '' }[orcOrd.col];
+  const s = orcOrd.asc ? 1 : -1;
+  return lista.slice().sort((a, b) => {
+    const x = chave(a), y = chave(b);
+    if (x === null || y === null) return (x === null) - (y === null);           // sem código ocWG → sempre no fim
+    const c = typeof x === 'number' ? x - y : String(x).localeCompare(String(y), 'pt');
+    return c * s || String(a.id).localeCompare(String(b.id), 'pt');
+  });
+}
 function renderOrcamentos(){
   if (!$('orcCorpo')) return;
   const q = norm(($('orcPesquisa') && $('orcPesquisa').value) || '');
@@ -2698,9 +2723,10 @@ function renderOrcamentos(){
   const rasc = filtrados.filter(o => !PROG_ENVIADOS.has(estadoReal(o)));
   if ($('orcNRasc')) $('orcNRasc').textContent = '(' + rasc.length + ')';
   if ($('orcNEnv')) $('orcNEnv').textContent = '(' + env.length + ')';
-  const lista = orcVista === 'env'
+  const lista = orcOrdenar(orcVista === 'env'
     ? env.slice().sort((a, b) => String(b.data_envio || b.atualizado_em || '').localeCompare(String(a.data_envio || a.atualizado_em || '')))
-    : rasc;
+    : rasc);
+  ['codigo','obra','cliente','estado','total','atualizado'].forEach(c => { const s = $('orcSi_' + c); if (s) s.textContent = orcOrd.col === c ? (orcOrd.asc ? '↑' : '↓') : '↕'; });
   const vazio = q ? 'Nada encontrado para «' + esc($('orcPesquisa').value) + '» neste separador.'
     : orcVista === 'env' ? 'Ainda sem orçamentos enviados.'
     : (orcamentos.length ? 'Sem rascunhos em curso — os enviados estão no separador «📤 Enviados».' : 'Ainda sem orçamentos. Cria o primeiro ou começa a partir de um pedido na Pipeline.');
