@@ -911,7 +911,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-10-26e'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-10-26f'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -2656,9 +2656,21 @@ function chipOrc(estado){
   return '<span class="chip ' + (m[estado] || 'cinza') + '">' + esc(estado || '—') + '</span>';
 }
 
-// Orçamentação: «Em curso» (rascunhos/em revisão) separado de «Enviados» (enviado/adjudicado/perdido)
+// Orçamentação: «Em curso» separado de «Enviados» (enviado/adjudicado/não adjudicado)
 let orcVista = 'rasc';
 const ORC_ENVIADOS = new Set(['Enviado', 'Adjudicado', 'Perdido']);
+/* Estado REAL de um orçamento = o mesmo valor que o Histórico mostra na coluna Progresso
+   (uma só fonte de verdade — pedido do Zé, 2026-10-26). O campo interno `estado` (usado nos KPIs,
+   análise e forecast) passa a ser derivado dele: Enviado/Adjudicado/Não Adjudicado → Enviado/
+   Adjudicado/Perdido; tudo o resto → Rascunho. */
+const PROG_PARA_ESTADO = { 'Enviado': 'Enviado', 'Adjudicado': 'Adjudicado', 'Não Adjudicado': 'Perdido' };
+const PROG_ENVIADOS = new Set(['Enviado', 'Adjudicado', 'Não Adjudicado']);
+function estadoReal(o){ return progressoEfetivo({ progresso: o.progresso, estado: o.estado }); }
+function chipProgresso(v){
+  const m = { 'Rascunho':'cinza', 'Iniciado':'cinza', 'No SharePoint':'roxo', 'Verificar':'ambar', 'Corrigir':'terra',
+              'Pendente Fornecedores':'roxo', 'Enviar':'verde', 'Enviado':'azul', 'Adjudicado':'verde-solido', 'Não Adjudicado':'erro' };
+  return '<span class="chip ' + (m[v] || 'cinza') + '">' + esc(v || '—') + '</span>';
+}
 function mudarVistaOrc(v){
   orcVista = v;
   $('orcVistaRasc').className = 'btn mini' + (v === 'rasc' ? ' primario' : ' ghost');
@@ -2670,8 +2682,8 @@ function renderOrcamentos(){
   const q = norm(($('orcPesquisa') && $('orcPesquisa').value) || '');
   const casa = o => !q || norm([o.id, o.nome_obra, o.cliente, o.pedido_id].join(' ')).includes(q);
   const filtrados = orcamentos.filter(casa);
-  const env = filtrados.filter(o => ORC_ENVIADOS.has(o.estado));
-  const rasc = filtrados.filter(o => !ORC_ENVIADOS.has(o.estado));
+  const env = filtrados.filter(o => PROG_ENVIADOS.has(estadoReal(o)));
+  const rasc = filtrados.filter(o => !PROG_ENVIADOS.has(estadoReal(o)));
   if ($('orcNRasc')) $('orcNRasc').textContent = '(' + rasc.length + ')';
   if ($('orcNEnv')) $('orcNEnv').textContent = '(' + env.length + ')';
   const lista = orcVista === 'env'
@@ -2685,7 +2697,7 @@ function renderOrcamentos(){
     '<td><b>' + esc(o.id) + '</b></td>' +
     '<td>' + esc(o.nome_obra || '—') + '</td>' +
     '<td>' + esc(o.cliente || '—') + '</td>' +
-    '<td>' + chipOrc(o.estado) + '</td>' +
+    '<td>' + chipProgresso(estadoReal(o)) + '</td>' +   // = coluna Progresso do Histórico
     '<td class="num">' + fmtEur(o.total) + '</td>' +
     '<td>' + fmtData(o.atualizado_em) + '</td>' +
     '<td onclick="event.stopPropagation()"><button class="btn perigo" title="Apagar" onclick="apagarOrcamento(\'' + esc(o.id).replace(/'/g, "\\'") + '\')">✕</button></td>' +
@@ -2816,7 +2828,13 @@ function abrirEditor(){
   $('hId').readOnly = !atual.novo;
   $('hId').style.background = atual.novo ? '' : 'var(--cal)';
   $('hObra').value = h.nome_obra || '';
-  $('hEstado').value = h.estado || 'Rascunho';
+  // Estado = o mesmo valor/opções da coluna Progresso do Histórico
+  const pe = progressoEfetivo({ progresso: h.progresso, estado: h.estado || 'Rascunho' });
+  const opsE = PROGRESSO_OPCOES.includes(pe) ? PROGRESSO_OPCOES : [pe].concat(PROGRESSO_OPCOES);
+  $('hEstado').innerHTML = opsE.map(o => '<option>' + esc(o) + '</option>').join('');
+  $('hEstado').value = pe;
+  atual._estadoInicial = pe; atual._progMudou = false; atual._atrib = null;
+  $('hEstado').onchange = editorEstadoMudou;
   $('hPedido').value = h.pedido_id || '—';
   $('hCliente').value = h.cliente || '';
   $('hEmail').value = h.email_cliente || '';
@@ -2841,7 +2859,14 @@ function lerCabecalho(){
   const h = atual.header;
   h.id = $('hId').value.trim();
   h.nome_obra = $('hObra').value.trim();
-  h.estado = $('hEstado').value;
+  // só mexe no estado/progresso se o utilizador mudou o campo (não esmaga uma mudança feita
+  // entretanto no Histórico com o valor que estava no ecrã quando o editor abriu)
+  const pv = $('hEstado').value;
+  if (pv !== atual._estadoInicial) {
+    if (PROGRESSO_OPCOES.includes(pv)) { h.progresso = pv; h.estado = PROG_PARA_ESTADO[pv] || 'Rascunho'; }
+    else h.estado = pv;
+    atual._progMudou = true;
+  }
   h.cliente = $('hCliente').value.trim();
   h.email_cliente = $('hEmail').value.trim();
   h.localizacao = $('hLocal').value.trim();
@@ -3723,6 +3748,7 @@ async function guardarOrcamento(silencioso){
   // gravado antigo continuava a ganhar na tabela do histórico)
   if (ESTADO_PARA_PROGRESSO[h.estado] && (atual.novo || h.estado !== estadoAntes))
     corpo.progresso = ESTADO_PARA_PROGRESSO[h.estado];
+  if (atual._progMudou && h.progresso) corpo.progresso = h.progresso;   // estado escolhido no editor = Progresso do Histórico
   try {
     await db(NOVO, 'orcamentos_v2?on_conflict=id', {
       method: 'POST',
@@ -3748,6 +3774,9 @@ async function guardarOrcamento(silencioso){
       await db(NOVO, 'orcamentos_v2_linhas?id=in.(' + antigas.map(x => x.id).join(',') + ')', { method: 'DELETE' });
     atual.novo = false;
     sujo = false;
+    if (corpo.progresso) h.progresso = corpo.progresso;
+    atual._estadoInicial = $('hEstado').value; atual._progMudou = false;
+    if (atual._atrib) { const a = atual._atrib; atual._atrib = null; atribAplicar(h.id, h.nome_obra, a.valor, a.ini); }
     $('hId').readOnly = true;
     $('hId').style.background = 'var(--cal)';
     if (!silencioso) toast('Orçamento guardado — ' + fmtEur(total));
@@ -4905,6 +4934,7 @@ async function gravarProgresso(idx, valor, lemb){
       if (valor === 'Adjudicado') corpo.estado = 'Adjudicado';
       else if (valor === 'Não Adjudicado') corpo.estado = 'Perdido';
       else if (valor === 'Enviado') { corpo.estado = 'Enviado'; if (!o || !o.data_envio) corpo.data_envio = new Date().toISOString(); }
+      else corpo.estado = 'Rascunho';   // estado interno derivado do Progresso (Orçamentação mostra o Progresso)
       await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(it.codigo), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify(corpo) });
       if (o) { o.progresso = valor; if (corpo.estado) o.estado = corpo.estado; if (corpo.data_envio) o.data_envio = corpo.data_envio; if (lemb) o.lembretes = corpo.lembretes; }
       it.progresso = valor;
@@ -4915,6 +4945,7 @@ async function gravarProgresso(idx, valor, lemb){
       : valor === 'Enviado' ? 'Progresso: Enviado — marcado como enviado ✉️'
       : 'Progresso actualizado: ' + valor);
     renderHistorico();
+    renderOrcamentos();   // a Orçamentação mostra o mesmo estado — atualiza já
   } catch (e) { toast('Erro ao gravar progresso: ' + e.message, 'erro'); renderHistorico(); }
 }
 
@@ -4949,6 +4980,51 @@ async function atribExecutar(idx, valor, ini){
       : (p && !p.email ? ini + ' não tem email na equipa — atribuído mas não notificado' : 'Atribuído a ' + ini + ' (falha no email)'),
       ok ? undefined : 'erro');
   }
+}
+
+/* Estado mudado no EDITOR da Orçamentação — mesmas regras que no Histórico:
+   Verificar/Corrigir → atribuir a alguém (lembrete + email); Não Adjudicado → razão da perda. */
+async function editorEstadoMudou(){
+  if (!atual) return;
+  const v = $('hEstado').value;
+  if (v === atual._estadoInicial) return;
+  if (v === 'Verificar' || v === 'Corrigir') abrirAtribuicaoEditor(v);
+  else if (v === 'Não Adjudicado' && !atual.novo) {
+    await guardarOrcamento(true);
+    pedirMotivoPerda({ codigo: atual.header.id, obra: atual.header.nome_obra, antigo: false });
+  }
+}
+function abrirAtribuicaoEditor(valor){
+  if (!equipa.length) { toast('A equipa ainda não carregou — o estado muda, mas sem atribuição.'); return; }
+  const h = atual.header, acao = valor === 'Verificar' ? 'verificação' : 'correção';
+  $('emTitulo').textContent = (valor === 'Verificar' ? '🔍 Atribuir verificação' : '✏️ Atribuir correção') + ' — ' + ($('hId').value || h.id || '');
+  $('emCorpo').innerHTML =
+    '<div style="margin-bottom:10px;font-size:12.5px;color:var(--cinza)">Escolhe quem fica com a ' + acao + ' de <b>' + esc($('hObra').value || h.nome_obra || '') + '</b>. A pessoa recebe um email e o lembrete aparece nos follow-ups dela.</div>' +
+    '<div style="display:flex;flex-direction:column;gap:6px">' +
+    equipa.map(p => '<button class="pm-item" style="text-align:left;border:1px solid var(--linha);border-radius:8px;padding:9px 12px;cursor:pointer;background:#fff" onclick="atribEditorEscolher(\'' + esc(valor) + '\',\'' + esc(p.iniciais) + '\')"><b>' + esc(p.iniciais) + '</b>' + (p.nome ? ' · ' + esc(p.nome) : '') + (p.email ? '' : ' <span style="color:var(--erro)">(sem email — não será notificado)</span>') + '</button>').join('') +
+    '</div>';
+  $('emAcoes').innerHTML = '<button class="btn ghost" onclick="atribEditorEscolher(\'' + esc(valor) + '\',\'\')">Guardar sem atribuir</button>';
+  $('emailOverlay').classList.add('aberto');
+}
+function atribEditorEscolher(valor, ini){
+  emFechar();
+  if (!atual) return;
+  atual._atrib = ini ? { valor, ini } : null;
+  if (!atual.novo) guardarOrcamento(true);                      // grava já e aplica a atribuição
+  else if (ini) toast('A atribuição a ' + ini + ' fica feita quando gravares o orçamento.');
+}
+async function atribAplicar(codigo, obra, valor, ini){
+  try {
+    const p = equipaDe(ini);
+    const lemb = { data: new Date().toISOString().slice(0,10), texto: (valor === 'Verificar' ? '🔍 Verificar orçamento' : '✏️ Corrigir orçamento'), done: false, resp: ini, resp_email: (p && p.email) || '', auto: valor.toLowerCase() };
+    const cur = ((await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(codigo) + '&select=lembretes')) || [])[0] || {};
+    const lembretes = (Array.isArray(cur.lembretes) ? cur.lembretes : []).concat([lemb]);
+    await db(NOVO, 'orcamentos_v2?id=eq.' + encodeURIComponent(codigo), { method:'PATCH', headers:{ Prefer:'return=minimal' }, body: JSON.stringify({ lembretes }) });
+    const o = orcamentos.find(x => x.id === codigo); if (o) o.lembretes = lembretes;
+    const ok = await notificarLembrete(ini, lemb, codigo, obra);
+    toast(ok ? '✉️ ' + ini + ' foi notificado para ' + (valor === 'Verificar' ? 'verificar' : 'corrigir')
+      : (p && !p.email ? ini + ' não tem email na equipa — atribuído mas não notificado' : 'Atribuído a ' + ini + ' (falha no email)'), ok ? undefined : 'erro');
+  } catch (e) { toast('Não consegui atribuir: ' + e.message, 'erro'); }
 }
 
 /* Encontra o link da pasta SharePoint de um registo do histórico, cruzando
