@@ -692,9 +692,21 @@ th .si{opacity:.45;font-size:10px}
     </div>
     <div class="am-corpo" id="histCorpoEdit"></div>
     <div class="am-acoes">
+      <button class="btn ghost" id="histBtnEnviar" onclick="histEnviarOrc()" style="margin-right:auto;display:none" title="Cria um rascunho de resposta ao email do pedido, com o orçamento em anexo">✉️ Enviar orçamento</button>
       <button class="btn ghost" onclick="histFecharEdit()">Cancelar</button>
       <button class="btn primario" onclick="histGuardar()">Guardar</button>
     </div>
+  </div>
+</div>
+
+<div id="envioOverlay" class="am-overlay">
+  <div class="am-caixa" style="max-width:720px">
+    <div class="am-cab" style="display:flex;justify-content:space-between;align-items:center">
+      <b id="envioTitulo">✉️ Enviar orçamento</b>
+      <button class="btn ghost mini" onclick="envioFechar()">✕ Fechar</button>
+    </div>
+    <div class="am-corpo" id="envioCorpo"></div>
+    <div class="am-acoes" id="envioAcoes"></div>
   </div>
 </div>
 
@@ -911,7 +923,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-10-26f'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-10-26g'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -4695,6 +4707,9 @@ function renderHistorico(){
     const iconeExcel = urlPasta
       ? ' <a href="#" onclick="event.stopPropagation(); abrirExcelHist(' + idx + '); return false" title="Abrir o Excel do orçamento (o mais recente da pasta)" style="text-decoration:none">📊</a>'
       : '';
+    const iconeEnviar = (urlPasta && /^ocWG26_\d{3}$/.test(it.codigo || ''))
+      ? ' <a href="#" onclick="event.stopPropagation(); abrirEnvioOrcamento(\'' + esc(it.codigo) + '\'); return false" title="Enviar orçamento — cria um rascunho de resposta ao email do pedido, com o orçamento em anexo" style="text-decoration:none">✉️</a>'
+      : '';
     const iconeEliminar = it.soSharePoint
       ? '<span style="color:var(--cinza)" title="Só a pasta do SharePoint — nada para eliminar">—</span>'
       : '<a href="#" onclick="event.stopPropagation(); apagarHist(' + idx + '); return false" title="Eliminar este orçamento do histórico" style="text-decoration:none">🗑️</a>';
@@ -4705,7 +4720,7 @@ function renderHistorico(){
       ? ' <a href="#" onclick="event.stopPropagation(); toggleGI(\'' + chArg + '\'); return false" title="' + (giTem(chGI) ? 'Remover das Obras de Grande Interesse' : 'Adicionar às Obras de Grande Interesse') + '" style="text-decoration:none">' + (giTem(chGI) ? '⭐' : '☆') + '</a>'
       : '';
     return '<tr class="clicavel-linha" onclick="abrirHistEdit(' + idx + ')" title="Clica para ver e editar">' +
-      '<td><b>' + esc(it.codigo) + '</b>' + iconePasta + iconeExcel + iconeGI + '</td>' +
+      '<td><b>' + esc(it.codigo) + '</b>' + iconePasta + iconeExcel + iconeEnviar + iconeGI + '</td>' +
       '<td onclick="event.stopPropagation()" onmousedown="event.stopPropagation()" onpointerdown="event.stopPropagation()">' + selProgressoHist(idx, it) + '</td>' +
       '<td title="' + esc(it.obra) + '">' + esc(it.obra.length > 48 ? it.obra.slice(0,47) + '…' : (it.obra || '—')) + '</td>' +
       '<td class="num">' + fmtEur(it.total) + '</td>' +
@@ -5045,11 +5060,107 @@ function abrirPastaHist(idx){
 }
 
 /* ===== Edição (clique na linha) ===== */
+/* ============================================================
+   ✉️ Enviar orçamento — cria um RASCUNHO no Outlook (caixa orcamentos@), em resposta ao
+   email do pedido, com o orçamento da pasta da obra em anexo. Nunca envia: a pessoa revê e
+   envia no Outlook. O servidor (edge orcamento-email) é que encontra o email e os ficheiros
+   a partir do código — só anexa ficheiros da pasta dessa obra.
+   ============================================================ */
+const FN_ORC_EMAIL = 'https://kgpwpzluqnekqckltkys.supabase.co/functions/v1/orcamento-email';
+const TEXTO_ENVIO_PADRAO =
+  'Segue, em anexo, a nossa proposta.\n\n' +
+  'Estamos ao dispor para qualquer esclarecimento e eventual visita à obra.\n\n' +
+  'Notas:\n' +
+  'O Empreiteiro geral deverá disponibilizar meios de elevação das cargas aos pisos superiores.\n' +
+  'Os preços apresentados foram calculados considerando a execução da totalidade do orçamento\n' +
+  'Pagamentos: 70% de adjudicação; 30% restantes contra autos mensais, pagos a 30 dias.\n' +
+  'Proposta válida por 30 dias';
+let ENVIO = null;
+function histEnviarOrc(){ const it = histLista[histEditIdx]; if (!it) return; histFecharEdit(); abrirEnvioOrcamento(it.codigo); }
+function envioFechar(){ $('envioOverlay').classList.remove('aberto'); ENVIO = null; }
+async function abrirEnvioOrcamento(codigo){
+  if (window.CONSULTOR) { toast('Vista de consultor — só leitura', 'erro'); return; }
+  ENVIO = { codigo };
+  $('envioTitulo').textContent = '✉️ Enviar orçamento — ' + codigo;
+  $('envioCorpo').innerHTML = '<div class="vazio" style="padding:30px">A procurar o email do pedido e os ficheiros da pasta…</div>';
+  $('envioAcoes').innerHTML = '';
+  $('envioOverlay').classList.add('aberto');
+  try {
+    const r = await fetch(FN_ORC_EMAIL + '?acao=preparar&codigo=' + encodeURIComponent(codigo), { headers: { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key } });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.message || ('HTTP ' + r.status));
+    if (!ENVIO || ENVIO.codigo !== codigo) return;
+    ENVIO.dados = d; envioRender();
+  } catch (e) {
+    $('envioCorpo').innerHTML = '<div style="color:var(--erro);padding:20px">Não consegui preparar o envio: ' + esc(e.message) + '</div>';
+    $('envioAcoes').innerHTML = '<button class="btn ghost" onclick="envioFechar()">Fechar</button>';
+  }
+}
+function envioRender(){
+  const d = ENVIO.dados, e = d.email;
+  const fmtT = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : (n > 1024 ? Math.round(n / 1024) + ' KB' : (n || 0) + ' B');
+  const excels = d.ficheiros.filter(f => f.excel);
+  const preMarcado = excels.length ? excels[0].id : (d.ficheiros[0] || {}).id;   // o Excel mais recente
+  const origem = e
+    ? '<div class="am-sec">Resposta ao email do pedido</div><div class="am-cartao"><div class="am-desc"><b>' + esc(e.assunto || '') + '</b></div>' +
+      '<div class="am-meta"><span>De: <b>' + esc((e.de && e.de.name) || '') + '</b> &lt;' + esc((e.de && e.de.address) || '') + '&gt;</span><span>' + esc(fmtData(e.data)) + '</span></div>' +
+      (e.interno ? '<div style="margin-top:6px;font-size:12px;color:#a33;font-weight:600">⚠ Este pedido foi reencaminhado por alguém da We Garden — muda o «Para» para o email do cliente.</div>' : '') + '</div>'
+    : '<div class="am-sec">Mensagem nova</div><div style="font-size:12.5px;color:#a33;margin-bottom:8px">⚠ Não encontrei o email original do pedido — vai ser criada uma mensagem nova. Indica o destinatário.</div>';
+  const fich = d.ficheiros.length
+    ? d.ficheiros.map(f => '<label style="display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--linha);font-size:13px;cursor:pointer">' +
+        '<input type="checkbox" class="envioF" value="' + esc(f.id) + '"' + (f.id === preMarcado ? ' checked' : '') + '> <span>' + (f.excel ? '📊' : '📄') + ' ' + esc(f.nome) + '</span>' +
+        '<span style="margin-left:auto;color:var(--cinza);font-size:11.5px;white-space:nowrap">' + fmtT(f.tamanho) + ' · ' + esc(fmtData(f.modificado)) + '</span></label>').join('')
+    : '<div style="color:#a33;font-size:12.5px">A pasta não tem ficheiros para anexar.</div>';
+  $('envioCorpo').innerHTML = origem +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">' +
+      '<label style="font-size:12px">Para<input id="envioPara" value="' + esc(d.destinoSugerido || '') + '" style="width:100%" placeholder="email@cliente.pt"></label>' +
+      '<label style="font-size:12px">CC<input id="envioCc" value="" style="width:100%" placeholder="(opcional)"></label></div>' +
+    (e ? '<label style="font-size:12.5px;display:flex;gap:6px;align-items:center;margin-bottom:8px"><input type="checkbox" id="envioTodos"> Responder a todos' +
+      (e.cc && e.cc.length ? ' <span style="color:var(--cinza)">(inclui em CC: ' + esc(e.cc.slice(0, 3).join(', ')) + (e.cc.length > 3 ? '…' : '') + ')</span>' : '') + '</label>' : '') +
+    '<div class="am-sec">Anexos — ' + esc((d.pasta && d.pasta.nome) || '') + (d.subpasta ? ' / ' + esc(d.subpasta) : '') + '</div>' + fich +
+    '<label style="font-size:12.5px;display:flex;gap:6px;align-items:center;margin:8px 0"><input type="checkbox" id="envioPdf"> Anexar também os Excel em PDF</label>' +
+    '<div class="am-sec">Texto do email</div><textarea id="envioTexto" style="width:100%;min-height:220px;font:13px/1.45 inherit;padding:8px">' + esc(TEXTO_ENVIO_PADRAO) + '</textarea>' +
+    '<div style="font-size:11.5px;color:var(--cinza);margin-top:4px">Fica como <b>rascunho</b> na caixa orcamentos@ — não é enviado. Revês no Outlook, acrescentas a assinatura e envias.</div>';
+  $('envioAcoes').innerHTML = '<button class="btn ghost" onclick="envioFechar()">Cancelar</button><button class="btn primario" id="envioOk" onclick="envioCriar()">📝 Criar rascunho no Outlook</button>';
+}
+async function envioCriar(){
+  if (!ENVIO || !ENVIO.dados) return;
+  const d = ENVIO.dados;
+  const ids = [...document.querySelectorAll('.envioF:checked')].map(x => x.value);
+  if (!ids.length) { toast('Escolhe pelo menos um ficheiro para anexar.', 'erro'); return; }
+  const paraV = $('envioPara').value.trim(), ccV = $('envioCc').value.trim();
+  if (!d.email && !paraV) { toast('Indica o destinatário (Para).', 'erro'); return; }
+  const corpo = {
+    codigo: d.codigo, ficheiros: ids, pdf: $('envioPdf').checked,
+    responderTodos: !!($('envioTodos') && $('envioTodos').checked),
+    // numa resposta, só mexe no «Para» se foi alterado (senão o «responder a todos» perdia destinatários)
+    para: (!d.email || paraV !== (d.destinoSugerido || '')) ? paraV : '',
+    cc: ccV || undefined, texto: $('envioTexto').value
+  };
+  const b = $('envioOk'); b.disabled = true; b.textContent = 'A criar o rascunho…';
+  try {
+    const r = await fetch(FN_ORC_EMAIL + '?acao=criar', { method: 'POST', headers: { apikey: NOVO.key, Authorization: 'Bearer ' + NOVO.key, 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.message || ('HTTP ' + r.status));
+    $('envioCorpo').innerHTML = '<div style="padding:8px 0"><div style="font-size:15px;font-weight:700;color:var(--verde);margin-bottom:8px">✓ Rascunho criado na caixa orcamentos@</div>' +
+      '<div style="font-size:13px;line-height:1.7"><b>Assunto:</b> ' + esc(j.assunto || '') + '<br><b>Para:</b> ' + esc((j.para || []).join(', ')) +
+      (j.cc && j.cc.length ? '<br><b>CC:</b> ' + esc(j.cc.join(', ')) : '') + '<br><b>Anexos:</b> ' + esc((j.anexos || []).join(' · ')) + '</div>' +
+      '<div style="font-size:12px;color:var(--cinza);margin-top:10px">Não foi enviado. Está nos <b>Rascunhos</b> da caixa orcamentos@: revê, acrescenta a assinatura e envia. Depois marca o orçamento como «Enviado» no Histórico.</div></div>';
+    $('envioAcoes').innerHTML = '<button class="btn ghost" onclick="envioFechar()">Fechar</button>' +
+      (j.webLink ? '<a class="btn primario" href="' + esc(j.webLink) + '" target="_blank" rel="noopener" style="text-decoration:none">Abrir rascunho no Outlook ↗</a>' : '');
+    toast('✉️ Rascunho criado — falta rever e enviar no Outlook');
+  } catch (e) {
+    b.disabled = false; b.textContent = '📝 Criar rascunho no Outlook';
+    toast('Não consegui criar o rascunho: ' + e.message, 'erro');
+  }
+}
+
 function abrirHistEdit(idx){
   const it = histLista[idx]; if (!it) return;
   histEditIdx = idx;
   const corChip = it.antigo ? 'cinza' : (it.soSharePoint ? 'roxo' : 'verde');
   $('histTitulo').innerHTML = esc(it.codigo) + ' <span class="chip ' + corChip + '">' + esc(it.fonte) + '</span>';
+  $('histBtnEnviar').style.display = /^ocWG26_\d{3}$/.test(it.codigo || '') ? '' : 'none';
   const r = it.raw;
   const fus = it.followups.length
     ? '<div class="full"><label>Follow-ups e notas registadas</label><ul class="followups" style="margin:0">' +
