@@ -911,7 +911,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-10-26a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-10-26b'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -2719,7 +2719,7 @@ async function abrirOrcamento(id){
     atual = {
       novo: false,
       header: hs[0],
-      linhas: ls.map(l => ({ tipo: l.tipo || 'artigo', codigo: l.codigo_artigo, descricao: l.descricao, unidade: l.unidade || '', quantidade: Number(l.quantidade) || 0, preco_unitario: Number(l.preco_unitario) || 0, _row: l.sp_row || undefined, _fromFile: !!l.sp_row }))
+      linhas: ls.map(l => ({ tipo: l.tipo || 'artigo', codigo: l.codigo_artigo, descricao: l.descricao, unidade: l.unidade || '', quantidade: Number(l.quantidade) || 0, preco_unitario: Number(l.preco_unitario) || 0, _row: l.sp_row || undefined, _fromFile: !!l.sp_row, _auto: l.auto_pct || undefined }))
     };
     // restaurar a ligação ao Excel original (origem + mapa de colunas), se existir,
     // para que continuar este orçamento preencha o ficheiro original e não regenere
@@ -3649,7 +3649,8 @@ async function guardarOrcamento(silencioso){
         unidade: l.tipo === 'artigo' ? (l.unidade || null) : null,
         quantidade: l.tipo === 'artigo' ? (l.quantidade || 0) : 0,
         preco_unitario: l.tipo === 'artigo' ? (l.preco_unitario || 0) : 0,
-        sp_row: (l.tipo === 'artigo' && l._row) ? l._row : null
+        sp_row: (l.tipo === 'artigo' && l._row) ? l._row : null,
+        auto_pct: (l.tipo === 'artigo' && l._auto) ? l._auto : null   // ⚡ por validar (sai quando se edita a linha)
       }));
       await db(NOVO, 'orcamentos_v2_linhas', { method: 'POST', headers: { 'Prefer': 'return=minimal' }, body: JSON.stringify(linhas) });
     }
