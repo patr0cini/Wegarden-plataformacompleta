@@ -911,7 +911,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-10-26c'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-10-26d'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -3068,12 +3068,24 @@ function palavrasIdentidade(toks){
   for (const t of toks) { if (/\d/.test(t)) continue; inicio.push(t); if (inicio.length >= 5) break; }
   return inicio.filter(t => (IDF[t] || 99) >= 3).slice(0, 3);
 }
-// → { score, j } do melhor candidato que passa as duas guardas, ou null
+/* Manutenção NUNCA é alvo de match automático (regra do Zé, 2026-10-26): é analisada caso a
+   caso, muitas vezes em obra. Olha só para a frase principal (antes da 1.ª vírgula, parêntese
+   ou «incluindo»), para não bloquear artigos de obra que só a mencionam («Transplante de árvore,
+   incluindo cuidados de manutenção», «Muro rampa acesso manutenção», estaleiro, PSS…).
+   Validado em 42 descrições reais: 27 de manutenção apanhadas, 15 de obra deixadas passar. */
+function eManutencao(desc){
+  const frase = norm(desc).split(/[,;:(]|\.\s|\bincluindo\b/)[0];
+  if (/acessos?\s+(de\s+|a\s+|para\s+)?manuten/.test(frase)) return false;
+  return /manuten|\bavenca|\bmantid[oa]s?\b/.test(frase);
+}
+// → { score, j } do melhor candidato que passa as guardas, ou null
 function melhorMatchAuto(descricao, unidade){
+  if (eManutencao(descricao)) return null;
   const cands = searchPrecos(descricao, 25);
   if (!cands.length) return null;
   const qk = kwSP(descricao), q = new Set(qk), qId = palavrasIdentidade(qk);
   for (const [score, j] of cands) {
+    if (eManutencao(precos[j].d)) continue;
     if (!unidCompat(unidade, precos[j].u)) continue;
     const c = new Set(precosTok[j]), cId = palavrasIdentidade(precosTok[j]);
     if (cId.length && cId.filter(t => q.has(t)).length / cId.length < 0.5) continue;  // identidade do artigo presente na linha
@@ -3093,7 +3105,8 @@ function pmRecalcular(){
       const a = precos[r[1]];
       const pct = Math.round(r[0] * 100);
       const cls = pct >= 80 ? 'alto' : (pct >= 50 ? 'medio' : 'baixo');
-      const unDif = !unidCompat(unLinha, a.u) ? ' · <b style="color:#a33">⚠ unidade ≠ ' + esc(unLinha) + '</b>' : '';
+      const unDif = (!unidCompat(unLinha, a.u) ? ' · <b style="color:#a33">⚠ unidade ≠ ' + esc(unLinha) + '</b>' : '') +
+        (eManutencao(a.d) ? ' · <b style="color:#854F0B">🔧 manutenção — caso a caso</b>' : '');
       return '<div class="pm-item" onclick="aplicarMatch(' + r[1] + ')">' +
         '<span class="pm-badge ' + cls + '">' + pct + '%</span>' +
         '<span class="pm-desc">' + esc(a.d) + '<div class="pm-meta">' + esc(a.f || '') + ' · ' + esc(a.u || '—') + (a.c ? ' · ' + esc(a.c) : '') + unDif + '</div></span>' +
@@ -3133,9 +3146,10 @@ function autoPreencher(){
   if (!atual) return;
   if (!precos.length) { toast('A tabela de preços ainda não carregou — vê o estado no topo.', 'erro'); return; }
   prepararIndice();
-  let nAuto = 0, nRever = 0, nSem = 0;
+  let nAuto = 0, nRever = 0, nSem = 0, nManut = 0;
   atual.linhas.forEach(l => {
     if (l.tipo !== 'artigo' || (l.preco_unitario > 0) || !(l.descricao || '').trim()) return;
+    if (eManutencao(l.descricao)) { nManut++; return; }    // manutenção: caso a caso, nunca automático
     const m = melhorMatchAuto(l.descricao, l.unidade);   // % tolerante + guardas de unidade e identidade
     if (!m) { if (searchPrecos(l.descricao, 1).length) nRever++; else nSem++; return; }
     const { score, j } = m;
@@ -3152,9 +3166,10 @@ function autoPreencher(){
   if (nAuto) marcarSujo();
   renderLinhas();
   const restam = nRever + nSem;
-  if (!nAuto && !restam) { toast('Todos os artigos já têm preço — nada a fazer.'); return; }
+  if (!nAuto && !restam && !nManut) { toast('Todos os artigos já têm preço — nada a fazer.'); return; }
   toast('⚡ ' + nAuto + ' preenchido' + (nAuto !== 1 ? 's' : '') + ' automaticamente (≥90%)' +
-    (restam ? ' · ' + restam + ' por rever' : '') + (nAuto ? '. Valida as linhas ⚡.' : '.'));
+    (restam ? ' · ' + restam + ' por rever' : '') +
+    (nManut ? ' · ' + nManut + ' de manutenção ' + (nManut !== 1 ? 'ficaram' : 'ficou') + ' para análise caso a caso' : '') + (nAuto ? '. Valida as linhas ⚡.' : '.'));
   if (nRever > 0 && confirm(nAuto + ' artigo(s) preenchido(s) automaticamente (≥90%).\n\n' +
       nRever + ' artigo(s) têm correspondência mas abaixo de 90% e precisam de ti.\n\nAbrir o assistente manual para os rever agora?'))
     matchAutomatico();
@@ -3168,11 +3183,15 @@ let AM = null;
 function matchAutomatico(){
   if (!atual) return;
   if (!precos.length) { toast('A tabela de preços ainda não carregou — vê o estado no topo.', 'erro'); return; }
-  const fila = [];
+  const fila = []; let nManut = 0;
   atual.linhas.forEach((l, i) => {
-    if (l.tipo === 'artigo' && !(l.preco_unitario > 0) && (l.descricao || '').trim()) fila.push(i);
+    if (l.tipo === 'artigo' && !(l.preco_unitario > 0) && (l.descricao || '').trim()) {
+      if (eManutencao(l.descricao)) nManut++;           // manutenção: caso a caso, fora do assistente
+      else fila.push(i);
+    }
   });
-  if (!fila.length) { toast('Todos os artigos já têm preço — nada a fazer.'); return; }
+  if (!fila.length) { toast(nManut ? 'Só faltam artigos de manutenção (' + nManut + ') — são analisados caso a caso, sem match.' : 'Todos os artigos já têm preço — nada a fazer.'); return; }
+  if (nManut) toast(nManut + ' artigo(s) de manutenção ficam fora do assistente — análise caso a caso.');
   fecharMatching();
   AM = { fila, total: fila.length, pos: 0, aplicados: 0, saltados: 0, sem: 0, actual: null, limiar: 0.60 };
   amAcoesNormais();
@@ -3206,7 +3225,7 @@ function amProximo(){
   const i = st.fila[st.pos];
   const l = atual.linhas[i];
   const g = melhorMatchAuto(l.descricao || '', l.unidade);   // protegido (unidade + identidade)
-  const top = g ? [g.score, g.j] : searchPrecos(l.descricao || '', 1)[0];
+  const top = g ? [g.score, g.j] : searchPrecos(l.descricao || '', 10).find(([, j]) => !eManutencao(precos[j].d));
   if (!top || top[0] < st.limiar) { st.sem++; st.pos++; setTimeout(amProximo, 0); return; }
   st.actual = { i, j: top[1] };
   const a = precos[top[1]];
