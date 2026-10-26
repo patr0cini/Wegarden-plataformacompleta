@@ -533,7 +533,7 @@ th .si{opacity:.45;font-size:10px}
         <button class="btn ghost mini" onclick="adicionarLinha('subcapitulo')">+ Subcapítulo</button>
         <button class="btn ghost mini" onclick="adicionarLinha('artigo')">+ Linha manual</button>
         <span class="sep"></span>
-        <button class="btn primario mini" onclick="autoPreencher()" title="Preenche automaticamente todos os artigos sem preço cujo melhor match é ≥90%. Marca-os com ⚡ para validares.">⚡ Auto ≥90%</button>
+        <button class="btn primario mini" onclick="autoPreencher()" title="Preenche automaticamente os artigos sem preço cujo melhor match é ≥90%, com a mesma unidade e o mesmo tipo de artigo (não basta o texto genérico ser parecido). Marca-os com ⚡ para validares.">⚡ Auto ≥90%</button>
         <button class="btn ghost mini" onclick="matchAutomatico()" title="Percorrer os artigos sem preço e sugerir correspondências da tabela, uma a uma">⚡ Match manual</button>
         <button class="btn ghost mini" onclick="document.getElementById('importFile').click()" title="Importar um ou vários mapas de quantidades do computador (frações/pisos da mesma obra — o preço de artigos iguais propaga-se)">⬆ Importar do computador</button>
         <button class="btn ghost mini" onclick="spAbrir()" title="Abrir mapa de quantidades a partir do SharePoint">☁ Importar do SharePoint</button>
@@ -911,7 +911,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-10-26b'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-10-26c'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -3032,18 +3032,71 @@ function searchPrecos(query, topN){
   return out.slice(0, topN);
 }
 
+/* ============================================================
+   Match para preenchimento AUTOMÁTICO (⚡ Auto ≥90% e assistente)
+   A % continua a do searchPrecos — tolerante a redação diferente do mesmo
+   artigo —, mas um candidato só conta se:
+     1. a unidade for compatível (m² ≠ m³ ≠ ml ≠ un …), e
+     2. as palavras de identidade (o início da descrição, a seguir a
+        «Fornecimento e execução de…») baterem nos dois sentidos.
+   Sem isto, o palavreado comum de caderno de encargos dava 91–100% a artigos
+   diferentes (borracha reciclada → casca de pinho; lancil → calçada).
+   Afinado a 2026-10-26 contra 1940 linhas de orçamentos enviados: rejeita os
+   falsos positivos conhecidos e mantém 93% dos matches com redação diferente.
+   ============================================================ */
+function normUnid(u){
+  let s = String(u || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[\s.]/g, '').replace('²', '2').replace('³', '3');
+  if (!s) return '';
+  if (/^(m2|m\^2|mq|metroquadrado|metrosquadrados)$/.test(s)) return 'm2';
+  if (/^(m3|m\^3|metrocubico|metroscubicos)$/.test(s)) return 'm3';
+  if (/^(ml|m|mlinear|metro|metros|metrolinear|metroslineares)$/.test(s)) return 'ml';
+  if (/^(un|und|unid|unidade|unidades|uni|u|pc|pcs|peca|pecas|ud|uds)$/.test(s)) return 'un';
+  if (/^(vg|vgs|verba|global|gl)$/.test(s)) return 'vg';
+  if (/^(mes|meses|mensal)$/.test(s)) return 'mes';
+  if (/^(h|hr|hora|horas)$/.test(s)) return 'h';
+  if (/^(kg|quilo|quilos)$/.test(s)) return 'kg';
+  if (/^(t|ton|tonelada|toneladas)$/.test(s)) return 't';
+  if (/^(l|lt|litro|litros)$/.test(s)) return 'l';
+  if (/^(dia|dias)$/.test(s)) return 'dia';
+  return s;
+}
+// unidade desconhecida de um dos lados → não bloqueia
+function unidCompat(a, b){ const x = normUnid(a), y = normUnid(b); return !x || !y || x === y; }
+// até 3 palavras distintivas (IDF ≥ 3) entre as 5 primeiras palavras com conteúdo
+function palavrasIdentidade(toks){
+  const inicio = [];
+  for (const t of toks) { if (/\d/.test(t)) continue; inicio.push(t); if (inicio.length >= 5) break; }
+  return inicio.filter(t => (IDF[t] || 99) >= 3).slice(0, 3);
+}
+// → { score, j } do melhor candidato que passa as duas guardas, ou null
+function melhorMatchAuto(descricao, unidade){
+  const cands = searchPrecos(descricao, 25);
+  if (!cands.length) return null;
+  const qk = kwSP(descricao), q = new Set(qk), qId = palavrasIdentidade(qk);
+  for (const [score, j] of cands) {
+    if (!unidCompat(unidade, precos[j].u)) continue;
+    const c = new Set(precosTok[j]), cId = palavrasIdentidade(precosTok[j]);
+    if (cId.length && cId.filter(t => q.has(t)).length / cId.length < 0.5) continue;  // identidade do artigo presente na linha
+    if (qId.length && qId.filter(t => c.has(t)).length / qId.length < 0.5) continue;  // identidade da linha presente no artigo
+    return { score, j };
+  }
+  return null;
+}
+
 function pmRecalcular(){
   clearTimeout(pmTimer);
   pmTimer = setTimeout(() => {
     if (!precos.length) { $('pmLista').innerHTML = '<div style="padding:16px;color:var(--cinza)">A tabela de preços ainda não carregou — vê o estado no topo.</div>'; return; }
     const res = searchPrecos($('pmPesquisa').value, 40);
+    const unLinha = (atual && atual.linhas[pmIdx] || {}).unidade || '';
     $('pmLista').innerHTML = res.length ? res.map(r => {
       const a = precos[r[1]];
       const pct = Math.round(r[0] * 100);
       const cls = pct >= 80 ? 'alto' : (pct >= 50 ? 'medio' : 'baixo');
+      const unDif = !unidCompat(unLinha, a.u) ? ' · <b style="color:#a33">⚠ unidade ≠ ' + esc(unLinha) + '</b>' : '';
       return '<div class="pm-item" onclick="aplicarMatch(' + r[1] + ')">' +
         '<span class="pm-badge ' + cls + '">' + pct + '%</span>' +
-        '<span class="pm-desc">' + esc(a.d) + '<div class="pm-meta">' + esc(a.f || '') + ' · ' + esc(a.u || '—') + (a.c ? ' · ' + esc(a.c) : '') + '</div></span>' +
+        '<span class="pm-desc">' + esc(a.d) + '<div class="pm-meta">' + esc(a.f || '') + ' · ' + esc(a.u || '—') + (a.c ? ' · ' + esc(a.c) : '') + unDif + '</div></span>' +
         '<span class="pm-preco">' + fmtEur(a.p) + '</span>' +
         '</div>';
     }).join('') : '<div style="padding:16px;color:var(--cinza)">Nada encontrado — tenta menos palavras ou sinónimos.</div>';
@@ -3083,9 +3136,9 @@ function autoPreencher(){
   let nAuto = 0, nRever = 0, nSem = 0;
   atual.linhas.forEach(l => {
     if (l.tipo !== 'artigo' || (l.preco_unitario > 0) || !(l.descricao || '').trim()) return;
-    const res = searchPrecos(l.descricao, 1);
-    if (!res.length) { nSem++; return; }
-    const [score, j] = res[0];
+    const m = melhorMatchAuto(l.descricao, l.unidade);   // % tolerante + guardas de unidade e identidade
+    if (!m) { if (searchPrecos(l.descricao, 1).length) nRever++; else nSem++; return; }
+    const { score, j } = m;
     if (score >= LIMIAR_AUTO) {
       const a = precos[j];
       l.preco_unitario = a.p;
@@ -3152,12 +3205,15 @@ function amProximo(){
   if (st.pos >= st.fila.length) { amResumo(false); return; }
   const i = st.fila[st.pos];
   const l = atual.linhas[i];
-  const res = searchPrecos(l.descricao || '', 1);
-  const top = res[0];
+  const g = melhorMatchAuto(l.descricao || '', l.unidade);   // protegido (unidade + identidade)
+  const top = g ? [g.score, g.j] : searchPrecos(l.descricao || '', 1)[0];
   if (!top || top[0] < st.limiar) { st.sem++; st.pos++; setTimeout(amProximo, 0); return; }
   st.actual = { i, j: top[1] };
   const a = precos[top[1]];
   const pct = Math.round(top[0] * 100);
+  const aviso = g ? '' : (!unidCompat(l.unidade, a.u)
+    ? '⚠ Unidade diferente (' + esc(l.unidade || '—') + ' vs ' + esc(a.u || '—') + ') — confirma antes de aplicar'
+    : '⚠ Pode não ser o mesmo artigo (material/tipo diferente) — confirma antes de aplicar');
   $('amCorpo').innerHTML =
     '<div class="am-sec">Artigo do orçamento</div>' +
     '<div class="am-cartao">' +
@@ -3167,8 +3223,9 @@ function amProximo(){
     '<div class="am-sec">Melhor correspondência na tabela</div>' +
     '<div class="am-cartao match">' +
       '<div class="am-linha-match"><div class="am-desc">' + esc(a.d) + '</div>' +
-      '<span class="am-pct ' + (pct >= 80 ? 'alto' : 'medio') + '">' + pct + '%</span></div>' +
+      '<span class="am-pct ' + (g && pct >= 80 ? 'alto' : 'medio') + '">' + pct + '%</span></div>' +
       '<div class="am-meta"><span>' + esc(a.u || '—') + (a.c ? ' · ' + esc(a.c) : '') + '</span><span><b>' + fmtEur(a.p) + '</b></span></div>' +
+      (aviso ? '<div style="margin-top:6px;font-size:12px;color:#a33;font-weight:600">' + aviso + '</div>' : '') +
     '</div>' +
     '<div class="am-teclas">Atalhos: <b>Y/Enter</b> aplicar · <b>N</b> saltar · <b>Esc</b> parar</div>';
 }
