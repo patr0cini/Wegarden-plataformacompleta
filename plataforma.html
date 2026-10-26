@@ -911,7 +911,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-10-26d'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-10-26e'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -3065,7 +3065,7 @@ function unidCompat(a, b){ const x = normUnid(a), y = normUnid(b); return !x || 
 // até 3 palavras distintivas (IDF ≥ 3) entre as 5 primeiras palavras com conteúdo
 function palavrasIdentidade(toks){
   const inicio = [];
-  for (const t of toks) { if (/\d/.test(t)) continue; inicio.push(t); if (inicio.length >= 5) break; }
+  for (const t of toks) { if (/\d/.test(t)) continue; if (!inicio.includes(t)) inicio.push(t); if (inicio.length >= 5) break; }
   return inicio.filter(t => (IDF[t] || 99) >= 3).slice(0, 3);
 }
 /* Manutenção NUNCA é alvo de match automático (regra do Zé, 2026-10-26): é analisada caso a
@@ -3078,6 +3078,19 @@ function eManutencao(desc){
   if (/acessos?\s+(de\s+|a\s+|para\s+)?manuten/.test(frase)) return false;
   return /manuten|\bavenca|\bmantid[oa]s?\b/.test(frase);
 }
+/* Dimensões (calibre PAP, contentor C2L, Ø mm, nº de estações, espessuras…) têm de bater:
+   o preço de uma árvore PAP 18/20 não é o de uma PAP 14/16. Se as duas descrições têm números,
+   têm de partilhar pelo menos metade deles (Jaccard ≥ 0,5); se um lado não tem números, não bloqueia.
+   Como é uma guarda dentro da procura, salta o calibre errado e fica com o certo se existir. */
+function numerosDe(s){
+  return new Set((String(s || '').match(/\d+(?:[.,]\d+)?/g) || []).map(x => String(parseFloat(x.replace(',', '.')))).filter(x => x !== '0'));
+}
+function dimensoesCompat(a, b){
+  const x = numerosDe(a), y = numerosDe(b);
+  if (!x.size || !y.size) return true;
+  const inter = [...x].filter(t => y.has(t)).length;
+  return inter / new Set([...x, ...y]).size >= 0.5;
+}
 // → { score, j } do melhor candidato que passa as guardas, ou null
 function melhorMatchAuto(descricao, unidade){
   if (eManutencao(descricao)) return null;
@@ -3088,8 +3101,9 @@ function melhorMatchAuto(descricao, unidade){
     if (eManutencao(precos[j].d)) continue;
     if (!unidCompat(unidade, precos[j].u)) continue;
     const c = new Set(precosTok[j]), cId = palavrasIdentidade(precosTok[j]);
-    if (cId.length && cId.filter(t => q.has(t)).length / cId.length < 0.5) continue;  // identidade do artigo presente na linha
+    if (cId.length && cId.filter(t => q.has(t)).length / cId.length <= 0.5) continue; // identidade do artigo presente na linha (mais de metade: género+espécie batem os dois)
     if (qId.length && qId.filter(t => c.has(t)).length / qId.length < 0.5) continue;  // identidade da linha presente no artigo
+    if (!dimensoesCompat(descricao, precos[j].d)) continue;                            // calibre/medidas iguais
     return { score, j };
   }
   return null;
