@@ -434,6 +434,7 @@ th .si{opacity:.45;font-size:10px}
       <button class="btn mini ghost" id="pipVistaEnviados" onclick="mudarVistaPip('enviados')">📤 Enviados <span id="pipEnviadosN"></span></button>
       <button class="btn mini ghost" id="pipVistaRever" onclick="mudarVistaPip('rever')">❓ Para rever <span id="pipReverN"></span></button>
       <button class="btn mini ghost" id="pipVistaFora" onclick="mudarVistaPip('fora')">🚫 Fora de Zona <span id="pipForaN"></span></button>
+      <button class="btn mini ghost" id="pipVistaHist" onclick="mudarVistaPip('hist')" title="Pedidos escondidos da pipeline porque a obra já está a ser tratada no Histórico">📁 No Histórico <span id="pipHistN"></span></button>
       <button class="btn mini primario" id="btnNovos" style="display:none;margin-left:auto" onclick="abrirNovosPedidos()"></button>
     </div>
     <div class="filtros">
@@ -950,7 +951,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-10-26i'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-11-11a'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -1036,6 +1037,7 @@ const TUTORIAL_SECOES = [
   { e:'📥', bg:'#FAEEDA', fg:'#854F0B', t:'Pipeline — os pedidos que entram', p:[
     'Os pedidos de orçamento aparecem <b>sozinhos</b>: a triagem lê a caixa orcamentos@ de poucos em poucos minutos e cria aqui cada pedido.',
     'Os sub-separadores separam o trabalho: <b>Não Iniciados</b> · <b>Em curso</b> · <b>Enviados</b>. «Para rever» = casos duvidosos; «Fora de Zona» = fora da área.',
+    '<b>📁 No Histórico</b> = pedidos escondidos da pipeline porque a obra já está a ser tratada no Histórico. Nada é apagado: ↩ repõe o pedido; 📁→ esconde um pedido com pasta.',
     'Passa o rato numa linha para ver 👁️ o <b>email original</b> e 📊 o <b>Excel</b> do orçamento enviado.',
     'Cada pedido é ligado automaticamente ao cliente e marcado no <b>Outlook</b> com a categoria do estado (Na Plataforma, Em Curso, Fora de Zona…).',
     'A <b>zona</b> é decidida pela triagem a partir do «local da obra», do código postal, do assunto e do texto do email (sem assinaturas): <b>fora</b> → Fora de Zona · <b>alargada</b> (Caldas, Óbidos, Grândola…) → Para rever. O chip 📍 junto à localização diz porquê.',
@@ -1287,7 +1289,7 @@ $('resultadosPrecos').addEventListener('click', e => {
    ============================================================ */
 async function carregarPedidos(){
   try {
-    pedidos = await db(PIPELINE, 'pedidos?select=id,ano,pedido,tipo,remetente,email,data,localizacao,estado,resp,codigo,sharepoint_url,associado_a,origem_email_id,zona,zona_motivo&order=data.desc.nullslast') || [];
+    pedidos = await db(PIPELINE, 'pedidos?select=id,ano,pedido,tipo,remetente,email,data,localizacao,estado,resp,codigo,sharepoint_url,associado_a,origem_email_id,zona,zona_motivo,no_historico&order=data.desc.nullslast') || [];
     pipEstados = [...new Set(pedidos.map(p => p.estado).filter(Boolean))].sort();
     if (!pipEstados.includes('No SharePoint')) pipEstados.push('No SharePoint');
     pipResps = [...new Set(pedidos.map(p => (p.resp || '').trim()).filter(Boolean))].sort();
@@ -1367,6 +1369,7 @@ function mudarVistaPip(v){
   $('pipVistaEnviados').className = 'btn mini' + (v === 'enviados' ? ' primario' : ' ghost');
   $('pipVistaRever').className = 'btn mini' + (v === 'rever' ? ' primario' : ' ghost');
   $('pipVistaFora').className = 'btn mini' + (v === 'fora' ? ' primario' : ' ghost');
+  $('pipVistaHist').className = 'btn mini' + (v === 'hist' ? ' primario' : ' ghost');
   renderPipeline();
 }
 
@@ -1483,7 +1486,7 @@ async function carregarProximoCodigoSP(){
 
 function pedidosPorConfirmar(){
   return pedidos.filter(p =>
-    p.origem_email_id && !p.sharepoint_url && !p.associado_a &&
+    p.origem_email_id && !p.sharepoint_url && !p.associado_a && !p.no_historico &&
     (p.estado === 'Não iniciado' || p.estado === 'Fora de Zona' || p.estado === 'Para rever')
   );
 }
@@ -2495,7 +2498,9 @@ function renderPipeline(){
     }
   });
   pipAssocPor = assocPor;
-  const eAssociado = p => p.associado_a && ids.has(String(p.associado_a)) && String(p.associado_a) !== String(p.id);
+  // associado OU escondido por a obra já estar no Histórico (no_historico = código ocWG) — só no separador 📁
+  const eAssociado = p => !!p.no_historico || (p.associado_a && ids.has(String(p.associado_a)) && String(p.associado_a) !== String(p.id));
+  setTimeout(() => { const el = $('pipHistN'); if (el) { const n = pedidos.filter(p => p.no_historico).length; el.textContent = n ? '(' + n + ')' : ''; } }, 0);
   // contadores dos separadores (sem os associados)
   const vivo = p => !eAssociado(p) && p.estado !== 'Fora de Zona' && p.estado !== 'Para rever';
   const nNovos = pedidos.filter(p => vivo(p) && eNaoIniciado(p)).length;
@@ -2506,8 +2511,10 @@ function renderPipeline(){
   const setN = (id, n) => { const el = $(id); if (el) el.textContent = n ? '(' + n + ')' : ''; };
   setN('pipNovosN', nNovos); setN('pipCursoN', nCurso); setN('pipEnviadosN', nEnviados); setN('pipForaN', nFora); setN('pipReverN', nRever);
   const lista = pedidos.filter(p => {
-    if (eAssociado(p)) return false;
-    if (pipVista === 'fora') { if (p.estado !== 'Fora de Zona') return false; }
+    if (pipVista === 'hist') { if (!p.no_historico) return false; }
+    else if (eAssociado(p)) return false;
+    if (pipVista === 'hist') { /* todos os escondidos, seja qual for o estado */ }
+    else if (pipVista === 'fora') { if (p.estado !== 'Fora de Zona') return false; }
     else if (pipVista === 'rever') { if (p.estado !== 'Para rever') return false; }
     else {
       if (p.estado === 'Fora de Zona' || p.estado === 'Para rever') return false;
@@ -2528,7 +2535,7 @@ function renderPipeline(){
     '<tr' + (p.estado === 'Fora de Zona' ? ' class="linha-fora-zona"' : '') + (pipSel.has(String(p.id)) ? ' style="background:var(--verde-suave)"' : '') + '>' +
     '<td style="text-align:center"><input type="checkbox" class="pip-sel" data-id="' + esc(String(p.id)) + '" onclick="pipToggleSel(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\', this.checked)"' + (pipSel.has(String(p.id)) ? ' checked' : '') + '></td>' +
     '<td>' + fmtData(p.data) + '</td>' +
-    '<td>' + esc(codigoDaPasta(p.sharepoint_url) || '—') + '</td>' +
+    '<td>' + esc(codigoDaPasta(p.sharepoint_url) || p.no_historico || '—') + '</td>' +
     '<td>' + esc(p.pedido || '—') +
       ((pipAssocPor[String(p.id)] || []).length
         ? ' <a href="#" class="chip roxo" onclick="verAssociados(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="' + (pipAssocPor[String(p.id)] || []).length + ' email(s) associado(s) a esta obra — clica para ver" style="text-decoration:none">🔗' + (pipAssocPor[String(p.id)] || []).length + '</a>'
@@ -2552,6 +2559,9 @@ function renderPipeline(){
       '<a href="#" onclick="emailPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\', window.open(\'\',\'_blank\')); return false" title="Abrir o email original no Outlook" style="text-decoration:none">✉️</a>' +
       (p.sharepoint_url ? ' <a href="#" onclick="arquivarEmail(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Arquivar o email e anexos na pasta" style="text-decoration:none">📥</a>' : '') +
       ' <a href="#" onclick="associarPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Associar a um pedido já existente (email duplicado da mesma obra)" style="text-decoration:none">🔗</a>' +
+      (p.no_historico
+        ? ' <a href="#" onclick="histPipeline(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\', false); return false" title="Repor na pipeline" style="text-decoration:none">↩</a>'
+        : (codigoDaPasta(p.sharepoint_url) ? ' <a href="#" onclick="histPipeline(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\', true); return false" title="Esconder da pipeline — a obra já está no Histórico" style="text-decoration:none">📁→</a>' : '')) +
       ' <a href="#" onclick="apagarPedido(\'' + esc(String(p.id)).replace(/'/g, "\\'") + '\'); return false" title="Apagar este pedido da pipeline" style="text-decoration:none">🗑️</a>' +
     '</td>' +
     '<td><button class="btn ghost mini" onclick="orcamentarPedido(\'' + esc(p.id).replace(/'/g, "\\'") + '\')">Orçamentar →</button></td>' +
@@ -2639,11 +2649,24 @@ async function apagarPedidosSelecionados(){
    Dashboard da pipeline (cartões por cima dos separadores)
    Os cartões de estado são clicáveis: filtram a lista (clicar de novo limpa).
    ============================================================ */
+// Esconde/repõe um pedido na pipeline quando a obra já está a ser tratada no Histórico.
+// Não apaga nada: o pedido mantém o email, a pasta e a ligação ao cliente.
+async function histPipeline(pid, esconder){
+  const p = pedidos.find(x => String(x.id) === String(pid)); if (!p) return;
+  const cod = esconder ? (codigoDaPasta(p.sharepoint_url) || 'sim') : null;
+  try {
+    await db(PIPELINE, 'pedidos?id=eq.' + encodeURIComponent(p.id), { method:'PATCH', headers:{ 'Prefer':'return=minimal' }, body: JSON.stringify({ no_historico: cod }) });
+    p.no_historico = cod;
+    toast(esconder ? 'Escondido da pipeline — continua no Histórico (separador 📁 No Histórico)' : 'Pedido reposto na pipeline');
+    renderPipeline();
+  } catch (e) { toast('Erro: ' + e.message, 'erro'); }
+}
+
 function renderKpisPip(){
   const el = $('pipKpis'); if (!el) return;
   const assocIds = new Set();
   Object.values(pipAssocPor).forEach(arr => arr.forEach(a => assocIds.add(String(a.id))));
-  const base = pedidos.filter(p => !assocIds.has(String(p.id)));
+  const base = pedidos.filter(p => !assocIds.has(String(p.id)) && !p.no_historico);
   const ativos = base.filter(p => p.estado !== 'Fora de Zona' && p.estado !== 'Para rever');
   const corte7 = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const novos7 = ativos.filter(p => p.data && new Date(p.data).getTime() >= corte7).length;
