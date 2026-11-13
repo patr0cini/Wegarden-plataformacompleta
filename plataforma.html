@@ -951,7 +951,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-11-11a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-11-13a'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -1140,7 +1140,7 @@ async function carregarPrecos(){
     if (!ACTIVE_SHEETS.size) ACTIVE_SHEETS = new Set(fornecedores);
     else ACTIVE_SHEETS = new Set([...ACTIVE_SHEETS].filter(s => fornecedores.includes(s)));
     precosInfo = { n: precos.length, quando: new Date() };
-    IDF = null; precosTok = null;
+    IDF = null; precosTok = null; GENEROS = null; PLANTAS_IDX = null; _espCache.clear(); _palCache.clear();
     construirChipsFornecedor();
     actualizarChipPrecos();
   } catch (e) {
@@ -3317,50 +3317,327 @@ function eManutencao(desc){
   if (/acessos?\s+(de\s+|a\s+|para\s+)?manuten/.test(frase)) return false;
   return /manuten|\bavenca|\bmantid[oa]s?\b/.test(frase);
 }
-/* Dimensões (calibre PAP, contentor C2L, Ø mm, nº de estações, espessuras…) têm de bater:
-   o preço de uma árvore PAP 18/20 não é o de uma PAP 14/16. Se as duas descrições têm números,
-   têm de partilhar pelo menos metade deles (Jaccard ≥ 0,5); se um lado não tem números, não bloqueia.
-   Como é uma guarda dentro da procura, salta o calibre errado e fica com o certo se existir. */
-function numerosDe(s){
-  return new Set((String(s || '').match(/\d+(?:[.,]\d+)?/g) || []).map(x => String(parseFloat(x.replace(',', '.')))).filter(x => x !== '0'));
+/* ============================================================
+   Match v2 (2026-11-13) — medidas normalizadas + plantas por género/espécie
+   Duas queixas do Zé que isto resolve:
+   1. «Válvula de esfera 1.1/2"» dava 100% a válvulas de 1" e 1.1/4" (as polegadas eram
+      deitadas fora pelo tokenizador) e, no automático, falhava a de 1 1/2" certa porque
+      «1.1/2» era lido como o decimal 1,1.
+   2. «Alnus glutinosa/ PAP 10-12 / alt. 2.00-2.50(m) / fuste limpo» dava <70% contra
+      «Ag.-Alnus glutinosa (PAP 10/12, copado a 2,20m)»: a mesma planta, no mesmo calibre,
+      escrita de outra maneira.
+   Como: (a) cada descrição é lida para medidas tipadas — polegadas, Ø mm, pressão, PAP,
+   vaso (litros) e altura — que se comparam por valor e não por texto; (b) numa planta
+   manda o binómio género+espécie e as medidas, não o palavreado à volta.
+   A % mostrada no painel passa a ser a mesma que o automático usa (com as penalizações).
+   ============================================================ */
+const numF = x => parseFloat(String(x).replace(',', '.'));
+const FRAC_UNI = { '½': 0.5, '¼': 0.25, '¾': 0.75, '⅛': 0.125, '⅜': 0.375, '⅝': 0.625, '⅞': 0.875 };
+const fracOk = (n, d) => [2, 4, 8, 16].includes(d) && n < d && n % 2 === 1;
+const ASPAS = '(?:"|\'\'|”|″|’’|“|´´|``)';
+
+// → { pol:Set, mm:Set, bar:Set, pap:Set('10-12'), vaso:Set(litros), alt:[lo,hi]|null (m), nums:Set, resto }
+function especs(texto, planta){
+  let s = ' ' + String(texto || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase() + ' ';
+  const e = { pol: new Set(), mm: new Set(), bar: new Set(), pap: new Set(), vaso: new Set(), alt: null, nums: new Set() };
+  const tira = (re, fn) => { s = s.replace(re, (...m) => (fn(...m) === false ? m[0] : ' ')); };
+  // PAP / calibre: «PAP 10-12», «pap: 12-14 cm», «PAP16/18», «14/16 PAP», «calibre 18/20»
+  const pap = (a, b) => { a = +a; b = +b; if (!(a < b && b <= 400)) return false; e.pap.add(a + '-' + b); };
+  tira(/\b(?:p\.?a\.?p\.?|d\.?a\.?p\.?|calibre|cal\.)\s*[:=\-]?\s*(\d{1,3})\s*(?:[-\/–]|a)\s*(\d{1,3})(?:\s*cm\b)?/g, (m, a, b) => pap(a, b));
+  tira(/\b(\d{1,3})\s*[-\/–]\s*(\d{1,3})\s*(?:cm\s*)?(?:de\s+)?p\.?a\.?p\b\.?/g, (m, a, b) => pap(a, b));
+  tira(/\bstds?\s*(\d{1,2})\s*[-\/]\s*(\d{1,2})(?:\s*cm\b)?/g, (m, a, b) => pap(a, b));          // Pannebaker «STD 10-12» = perímetro
+  tira(/\b(?:p\.?a\.?p\.?|d\.?a\.?p\.?)\s*[:=\-]?\s*(\d{1,3})(?![\d.,]|\s*[-\/–]\s*\d)(?:\s*cm\b)?/g, (m, a) => { e.pap.add(String(+a)); });
+  // altura: «alt. 2.00-2.50(m)», «ALT4/5m», «alt 100cm», «altura de 3,50 a 4,00m», «h=20/30cm», «H150-200», «copado a 2,20m»
+  const alt = (a, b, un) => {
+    let lo = numF(a), hi = b != null ? numF(b) : lo;
+    if (!(lo > 0) || !(hi > 0)) return false;
+    const cm = un ? /^c/.test(un) : Math.max(lo, hi) > 10;   // sem unidade: >10 são cm
+    if (cm) { lo /= 100; hi /= 100; }
+    if (lo > hi) [lo, hi] = [hi, lo];
+    if (!e.alt) e.alt = [lo, hi];
+  };
+  const N = '(\\d{1,3}(?:[.,]\\d{1,2})?)';
+  tira(new RegExp('\\b(?:alt(?:ura)?\\.?(?:\\s+(?:de|total|media|aprox\\.?))?|h)\\s*[:=]?\\s*' + N + '\\s*(?:m\\b|cm\\b)?\\s*(?:(?:[-\\/–]|a)\\s*' + N + ')?\\s*\\(?\\s*(cm|m)?\\b\\)?', 'g'),
+    (m, a, b, un) => alt(a, b, un || (/\dcm|\d\s+cm/.test(m) ? 'cm' : (/\d\s*m\b/.test(m) ? 'm' : null))));
+  tira(new RegExp('(?<![\\d.,\\/])' + N + '\\s*[-–\\/]\\s*' + N + '\\s*\\(?(cm|m)\\b\\)?(?!2|3|²|³)', 'g'), (m, a, b, un) => alt(a, b, un));
+  tira(new RegExp('(?<![\\d.,\\/])' + N + '\\s*(?:(?:[-–\\/]|a)\\s*' + N + '\\s*)?(cm|m)\\s+de\\s+alt(?:ura)?\\b', 'g'), (m, a, b, un) => alt(a, b, un));
+  if (planta) {
+    // intervalos soltos numa linha de planta: «14/16» é calibre (PAP); «60/80», «120/140» é altura em cm
+    const CLASSES_PAP = new Set(['6-8', '8-10', '10-12', '12-14', '14-16', '16-18', '18-20']);
+    tira(/(?<![\d.,\/=])(\d{1,3})\s*[-\/]\s*(\d{1,3})(?![\d.,\/]|\s*(?:m[2²3³]|un|pl|p[eé]s|l\b|lt))/g, (m, a, b) => {
+      a = +a; b = +b; if (!(a < b)) return false;
+      if (CLASSES_PAP.has(a + '-' + b)) { if (!e.pap.size) e.pap.add(a + '-' + b); return; }
+      if (b >= 30 && b <= 900 && !['20-25', '25-30', '30-35', '35-40', '40-45', '45-50'].includes(a + '-' + b)) { if (!e.alt) e.alt = [a / 100, b / 100]; return; }
+      return false;
+    });
+  }
+  tira(new RegExp('\\b(?:copad[oa]s?\\s+a|fuste\\s+(?:limpo\\s+)?(?:com|de|a))\\s*' + N + '\\s*(?:(?:[-\\/–]|a)\\s*' + N + ')?\\s*(cm|m)?\\b', 'g'), (m, a, b, un) => alt(a, b, un));
+  // vaso/contentor: «V1L», «C2,5L», «V5Lt», «vaso 5l», «Vaso 1,3L», «cont=15L», «C3.5» (Pannebaker), «P9»
+  const vaso = v => { v = numF(v); if (!(v > 0 && v <= 2000)) return false; e.vaso.add(String(v)); };
+  tira(/\b(?:vaso|contentor|cont\.?)\s*(?:de\s*)?[:=]?\s*(\d{1,4}(?:[.,]\d)?)\s*(?:lts?|litros?|l)\b/g, (m, v) => vaso(v));
+  tira(/\b[vc]\s?(\d{1,4}(?:[.,]\d)?)\s?(?:lts?|l)\b/g, (m, v) => vaso(v));
+  tira(/\(\s*(\d{1,3}(?:[.,]\d)?)\s?(?:lts?|l)\s*\)/g, (m, v) => vaso(v));
+  tira(/\bc(\d{1,4}(?:\.\d)?)\b/g, (m, v) => vaso(v));
+  tira(/\b(\d{1,3}(?:[.,]\d)?)\s*ltr?\s*pot\b/g, (m, v) => vaso(v));                        // Pannebaker «2 Ltr pot»
+  tira(/\b[pv]\s?(9|1[0-4])(?:\s?cm)?\b(?!\s*l)/g, (m, v) => { e.vaso.add('p' + v); });       // vaso de 9 cm: «P9», «V9», «v9cm»
+  if (/\balveolos?\b|\btabuleiros?\b|\btab\s?\d+|\btray\b|\bliners?\b|\b\d+\s*cel\b/.test(s)) e.vaso.add('alvéolo');
+  // pressão: «PN10», «PN 10Kg», «10 bar», «10Kg/cm²»
+  tira(/\bpn\s*(\d{1,2})(?:\s*kg(?:\s*\/\s*cm\s*2?)?)?\b/g, (m, v) => { e.bar.add(String(+v)); });
+  tira(/\b(\d{1,2}(?:[.,]\d)?)\s*(?:bar|atm|kg\s*\/\s*cm\s*[2²]?)(?![a-z])/g, (m, v) => { e.bar.add(String(numF(v))); });
+  // polegadas: «1.1/2"», «1 1/2''», «1½», «3/4”», «2"», «1 polegada»
+  tira(/(?<![\d.,\/])(\d{1,2})\s*([½¼¾⅛⅜⅝⅞])/g, (m, i, f) => { e.pol.add(String(+i + FRAC_UNI[f])); });
+  tira(/([½¼¾⅛⅜⅝⅞])/g, (m, f) => { e.pol.add(String(FRAC_UNI[f])); });
+  tira(new RegExp('(?<![\\d.,\\/])(\\d{1,2})\\s*[ .\\-]\\s*(\\d)\\s*\\/\\s*(\\d{1,2})(?![\\d\\/])\\s*' + ASPAS + '*', 'g'),
+    (m, i, n, d) => { if (!fracOk(+n, +d)) return false; e.pol.add(String(+i + n / d)); });
+  tira(new RegExp('(?<![\\d.,\\/])(\\d)\\s*\\/\\s*(\\d{1,2})(?![\\d\\/])\\s*' + ASPAS + '*', 'g'),
+    (m, n, d) => { if (!fracOk(+n, +d)) return false; e.pol.add(String(n / d)); });
+  tira(new RegExp('(?<![\\d.,\\/])(\\d{1,2}(?:[.,]\\d)?)\\s*(?:' + ASPAS + '|pol(?:egadas?)?\\b)', 'g'), (m, v) => { e.pol.add(String(numF(v))); });
+  // diâmetros / mm: «Ø50mm», «Æ32», «DN63», «16mm», «63 mm»
+  tira(/(?:ø|æ|\bdn|\bdiam(?:etro)?\.?(?:\s+de)?|\bd\s*=)\s*(\d{1,4}(?:[.,]\d)?)\s*(?:mm\b)?/g, (m, v) => { e.mm.add(String(numF(v))); });
+  tira(/(?<![\d.,])(\d{1,4}(?:[.,]\d)?)\s*mm\b/g, (m, v) => { e.mm.add(String(numF(v))); });
+  // o que sobra de números (espessuras em cm, nº de estações, mesh, g/m²…)
+  for (const x of (s.match(/\d+(?:[.,]\d+)?/g) || [])) { const v = String(numF(x)); if (v !== '0') e.nums.add(v); }
+  e.resto = s;
+  return e;
 }
-function dimensoesCompat(a, b){
-  const x = numerosDe(a), y = numerosDe(b);
-  if (!x.size || !y.size) return true;
-  const inter = [...x].filter(t => y.has(t)).length;
-  return inter / new Set([...x, ...y]).size >= 0.5;
+const _espCache = new Map();
+function especsDe(t, planta){ const k = (planta ? '§' : '') + t; let e = _espCache.get(k); if (!e) { e = especs(t, planta); if (_espCache.size > 200000) _espCache.clear(); _espCache.set(k, e); } return e; }
+const todosNumeros = t => new Set((String(t).replace(/^.*›/, ' ').match(/\d+(?:[.,]\d+)?/g) || []).map(x => String(numF(x))));
+const intersecta = (a, b) => { for (const x of a) if (b.has(x)) return true; return false; };
+const jaccard = (a, b) => { let i = 0; for (const x of a) if (b.has(x)) i++; return i / (a.size + b.size - i); };
+
+/* ---------- plantas ---------- */
+let GENEROS = null, PLANTAS_IDX = null;
+const FOLHAS_PLANTAS = /planta\s*livre|pannebaker|diaplant|viveir|plant/i;
+const SEM_GENERO = new Set(['tubo', 'tubagem', 'valvula', 'caixa', 'kit', 'fornecimento', 'rede', 'tela', 'terra', 'substrato', 'casca', 'relva', 'tapete', 'mistura', 'planta', 'plantas', 'arvore', 'arvores', 'arbusto', 'arbustos', 'herbacea', 'herbaceas', 'trepadeira', 'vaso', 'verdes']);
+function palavrasPlanta(t){
+  return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().split(/[^a-z.×]+/).filter(Boolean);
 }
-// → { score, j } do melhor candidato que passa as guardas, ou null
-function melhorMatchAuto(descricao, unidade){
-  if (eManutencao(descricao)) return null;
-  const cands = searchPrecos(descricao, 25);
-  if (!cands.length) return null;
-  const qk = kwSP(descricao), q = new Set(qk), qId = palavrasIdentidade(qk);
-  for (const [score, j] of cands) {
-    if (eManutencao(precos[j].d)) continue;
-    if (!unidCompat(unidade, precos[j].u)) continue;
-    const c = new Set(precosTok[j]), cId = palavrasIdentidade(precosTok[j]);
-    if (cId.length && cId.filter(t => q.has(t)).length / cId.length <= 0.5) continue; // identidade do artigo presente na linha (mais de metade: género+espécie batem os dois)
-    if (qId.length && qId.filter(t => c.has(t)).length / qId.length < 0.5) continue;  // identidade da linha presente no artigo
-    if (!dimensoesCompat(descricao, precos[j].d)) continue;                            // calibre/medidas iguais
-    return { score, j };
+// primeiro «género espécie» da descrição → { g, e, fim } (fim = posição a seguir à espécie no texto normalizado) ou null
+function binomio(t){
+  if (!GENEROS) return null;
+  const s = String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const re = /[a-z]{4,}/g; let m;
+  while ((m = re.exec(s))) {
+    if (!GENEROS.has(m[0])) continue;
+    const r = /^\s*(?:[x×]\s+)?([a-z]{3,})(\.?)/.exec(s.slice(m.index + m[0].length));
+    if (!r || STOP_PT.has(r[1]) || DESC_PLANTA.has(r[1]) || GENEROS.has(r[1])) continue;
+    // o que vem antes do género tem de ser só prefácio («Fornecimento e plantação de…», «Ag.-», «Verdes ›»):
+    // «Transplante de… Celtis australis» ou «Abertura de covas para Quercus» não são a planta
+    const antes = s.slice(0, m.index).replace(/^.*›/, ' ');
+    if (antes.length > 60) return null;
+    if (antes.length > 25) for (const w of antes.split(/[^a-z]+/)) if (w.length > 3 && !STOP_PT.has(w) && !PREFACIO_PLANTA.has(stemPT(w))) return null;   // ≤25: código ou nome comum («Qsu.», «Murta (»)
+    if (NAO_E_PLANTA.test(s)) return null;
+    return { g: m[0], e: r[1], abrev: !!r[2] && r[1].length <= 6, ponto: !!r[2], fim: m.index + m[0].length + r[0].length, s };
   }
   return null;
+}
+const PREFACIO_PLANTA = new Set(['plantacao', 'plantar', 'arvore', 'arbusto', 'subarbusto', 'herbacea', 'trepadeira', 'especie', 'exemplar', 'planta', 'verde', 'preco', 'menor', 'maior', 'colocacao', 'transporte', 'acordo', 'caderno', 'encargo', 'projeto', 'projecto', 'seguinte', 'espacamento', 'estrato', 'arboreo', 'arbustivo', 'herbaceo', 'bolbo', 'gramine', 'aromatica', 'vivaz', 'folha', 'caduca', 'persistente', 'porte', 'medio', 'grande', 'pequeno']);
+const NAO_E_PLANTA = /\bexistentes?\b|transplant|\babate|\bpodas?\b|\bsementes?\b|sementeira/;
+const DESC_PLANTA = new Set(['fuste', 'limpo', 'limpa', 'ramificado', 'ramificada', 'copado', 'copada', 'alt', 'altura', 'pap', 'dap', 'calibre', 'vaso', 'contentor', 'cont', 'torrao', 'raiz', 'nua', 'flecha', 'flechado', 'com', 'de', 'em', 'desde', 'base', 'plantacao', 'plantar', 'tufo', 'touca', 'multicaule', 'multitronco', 'tronco', 'exemplar', 'porte', 'aprox', 'incluindo', 'tipo', 'tabuleiro', 'alveolo', 'arbusto', 'arvore', 'densidade', 'diametro', 'larg', 'largura', 'esp', 'compasso', 'por', 'para', 'un', 'und', 'unid', 'var', 'subsp', 'ssp', 'spp', 'cv', 'forma', 'bola', 'piramide', 'espaldeira', 'apresentacao', 'ou', 'equivalente', 'similar', 'the', 'bush', 'solitair', 'whip', 'std', 'standard', 'stam', 'feathered', 'multistem', 'specimen']);
+// cultivar/variedade logo a seguir à espécie: «'Fastigiata Koster'», «var. prostratus», «nana», «branca»
+function variedade(b){
+  let r = b.s.slice(b.fim);
+  const q = /^\s*(?:var\.?|subsp\.?|ssp\.?|cv\.?)?\s*['"‘’“”´`]+\s*([^'"‘’“”´`]{2,40})['"‘’“”´`]/.exec(r);
+  const marc = /^\s*(?:var|subsp|ssp|cv)\b\.?\s*([a-z][a-z ]*)/.exec(r);
+  let bruto = q ? q[1] : marc ? marc[1] : (b.ponto ? '' : (/^ +([a-z][a-z ]*)/.exec(r) || [])[1] || '');
+  const out = [];
+  for (const w of bruto.split(/\s+/)) {
+    if (!w) continue;
+    if (!q && (DESC_PLANTA.has(w) || STOP_PT.has(w) || w.length < 3)) break;
+    out.push(w.replace(/[aeo]s?$/, ''));           // prostratus/prostrata/prostatus ≈
+    if (out.length >= 2) break;
+  }
+  return out;
+}
+const FORMA_MULTI = /multicaule|multitronco|multi-?stem|\btufo\b|\btouca\b|\bmeerstammig|ramifica\w+ desde a base/;
+const FORMA_FUSTE = /\bfuste\b|\bflecha|\bcopad[oa]\b|\btronco\b|\bstam\b|\bstd\b|standard|alto fuste/;
+function formaPlanta(s){ return FORMA_MULTI.test(s) ? 'multi' : (FORMA_FUSTE.test(s) ? 'fuste' : ''); }
+const raizEsp = e => e.replace(/(us|um|is|a|e|i)$/, '');
+const mesmaEspecie = (a, b) => a.g === b.g && (a.e === b.e || raizEsp(a.e) === raizEsp(b.e) ||
+  (b.abrev && a.e.startsWith(b.e)) || (a.abrev && b.e.startsWith(a.e)));
+
+function prepararPlantas(){
+  if (GENEROS || !precos.length) return;
+  const cont = {};
+  for (const a of precos) {
+    if (!FOLHAS_PLANTAS.test(a.f || '')) continue;
+    const m = /^[a-z]{4,}/.exec(norm(a.d));
+    if (m && !SEM_GENERO.has(m[0]) && !STOP_PT.has(m[0])) cont[m[0]] = (cont[m[0]] || 0) + 1;
+  }
+  GENEROS = new Set(Object.keys(cont).filter(g => cont[g] >= 2));
+  PLANTAS_IDX = new Map();
+  for (let j = 0; j < precos.length; j++) {
+    const b = binomio(precos[j].d); if (!b) continue;
+    precos[j]._b = b;
+    if (!PLANTAS_IDX.has(b.g)) PLANTAS_IDX.set(b.g, []);
+    PLANTAS_IDX.get(b.g).push(j);
+  }
+}
+
+/* ---------- avaliação de um candidato ----------
+   → { score, avisos:[texto], duro:bool }  (duro = nunca entra no automático) */
+function avaliarCandidato(descricao, unidade, j, lex, ctx){
+  const a = precos[j], av = [];
+  let s = lex, duro = false;
+  const eq = ctx.eq, ec = especsDe(String(a.d).replace(/^.*›/, ' '));
+  if (!unidCompat(unidade, a.u)) { av.push('unidade ≠ ' + (unidade || '')); duro = true; s = Math.min(s, 0.6); }
+  if (eManutencao(a.d)) { av.push('manutenção — caso a caso'); duro = true; }
+  const bq = ctx.bq, bc = a._b || null;
+  if (bq && bc && mesmaEspecie(bq, bc)) {
+    /* PLANTA, mesma espécie: a nota parte de 100 e desce pelo que difere */
+    s = 1;
+    const eq = especsDe(descricao, true), ec = especsDe(String(a.d).replace(/^.*›/, ' '), true);
+    const vq = variedade(bq), vc = variedade(bc);
+    if (vq.length || vc.length) {
+      const comum = vq.filter(x => vc.some(y => y === x || y.startsWith(x) || x.startsWith(y))).length;
+      if (!comum) { s -= (vq.length && vc.length) ? 0.25 : 0.12; av.push('variedade ≠ (' + (vc.join(' ') || 'sem variedade') + ')'); }
+    }
+    const tem = k => eq[k].size > 0, temC = k => ec[k].size > 0;
+    const tamQ = tem('pap') || tem('vaso') || !!eq.alt, tamC = temC('pap') || temC('vaso') || !!ec.alt;
+    if (tamQ && !tamC) { s -= 0.15; av.push('sem tamanho na tabela'); }
+    else if (!tamQ && tamC) { s -= temC('pap') ? 0.12 : 0.07; av.push('tamanho só na tabela'); }   // árvore sem calibre no mapa: não é automático
+    else if (tamQ && tamC) {
+      let comum = 0;
+      for (const [k, nome] of [['pap', 'PAP'], ['vaso', 'vaso']]) {
+        if (tem(k) && temC(k)) { if (intersecta(eq[k], ec[k])) comum++; else { s = Math.min(s, 0.6); duro = true; av.push(nome + ' ≠ ' + [...ec[k]].join('/')); } }
+        else if (tem(k)) { s -= 0.12; av.push('sem ' + nome + ' na tabela'); }
+        else if (temC(k)) { s -= k === 'pap' ? 0.08 : 0.03; if (k === 'pap') av.push('PAP só na tabela'); }
+      }
+      if (eq.alt && ec.alt) {
+        const folga = Math.max(eq.alt[0], ec.alt[0]) - Math.min(eq.alt[1], ec.alt[1]);      // >0: os intervalos não se tocam
+        if (folga > 0.10 * Math.max(eq.alt[0], ec.alt[0])) { s -= comum ? 0.12 : 0.30; av.push('altura ≠'); }
+        else { comum++; const dentro = (eq.alt[0] >= ec.alt[0] && eq.alt[1] <= ec.alt[1]) || (ec.alt[0] >= eq.alt[0] && ec.alt[1] <= eq.alt[1]); if (folga >= 0 && !dentro) s -= 0.04; }                                        // só se tocam (1,00-1,50 vs 0,80-1,00): quase
+      } else if (eq.alt && !ec.alt) { s -= comum ? 0.03 : 0.15; if (!comum) av.push('sem altura na tabela'); }
+      if (!comum && s > 0.88) s = 0.88;          // nenhum tamanho em comum confirmado → não é automático
+    }
+    const fq = formaPlanta(bq.s), fc = formaPlanta(bc.s);
+    if (fq && fc && fq !== fc) { s -= 0.15; av.push('forma ≠ (' + (fc === 'multi' ? 'multicaule' : 'fuste') + ')'); }
+    else if (fq && !fc) s -= 0.03;
+    return { score: Math.max(0, s), avisos: av, duro, planta: true };
+  }
+  if (bq && bc) { av.push('outra espécie'); duro = true; s = Math.min(s, 0.5); return { score: s, avisos: av, duro }; }
+  if (bq && !bc && ctx.haEspecie) { s = Math.min(s, 0.7); }       // a linha é uma planta e há essa planta na tabela: um não-planta não é 100%
+  /* GENÉRICO: identidade (como antes) + medidas tipadas */
+  const q = ctx.q, c = new Set(precosTok[j]), cId = palavrasIdentidade(precosTok[j]);
+  if (cId.length && cId.filter(t => q.has(t)).length / cId.length <= 0.5) { duro = true; s *= 0.8; av.push('outro artigo?'); }
+  else if (ctx.qId.length && ctx.qId.filter(t => c.has(t)).length / ctx.qId.length < 0.5) { duro = true; s *= 0.8; av.push('outro artigo?'); }
+  let conflito = false, faltas = 0;
+  for (const [k, nome] of [['pol', 'polegadas'], ['mm', 'Ø'], ['bar', 'pressão'], ['pap', 'PAP'], ['vaso', 'vaso']]) {
+    if (eq[k].size && ec[k].size) { if (!intersecta(eq[k], ec[k])) { conflito = true; av.push(nome + ' ≠'); } }
+    else if (eq[k].size && (k === 'pol' || k === 'mm')) {
+      // a medida pode estar na outra unidade (Ø50 ↔ 1.1/2"): só conta como falta se o candidato não tiver nenhuma das duas
+      if (!ec.pol.size && !ec.mm.size) faltas++;
+    }
+  }
+  if (!conflito && eq.pol.size && ec.pol.size === 0 && eq.mm.size === 0 && ec.mm.size) { /* pol vs mm: não comparável */ }
+  if (eq.nums.size && ec.nums.size && jaccard(eq.nums, ec.nums) < 0.5) { conflito = true; av.push('medidas ≠'); }
+  if (conflito) { duro = true; s = Math.min(s * 0.7, 0.65); }
+  else if (faltas) { s -= 0.06 * faltas; av.push('sem medida na tabela'); }
+  else if (!duro) {
+    /* Artigo curto da tabela «contido» num enunciado comprido de caderno de encargos
+       («tubagem PEAD 32 mm de 10 BAR» ⊂ «Fornecimento e instalação de tubagem Ø32 em PEAD PN 10Kg…, envolvido em areia…»):
+       as palavras do artigo estão todas na linha e as medidas tipadas são as mesmas → sobe a nota.
+       Só com medidas iguais a confirmar — sem elas, «Tubagem PEAD» estaria contido em tudo. */
+    let iguais = 0;
+    for (const k of ['pol', 'mm', 'bar', 'pap', 'vaso']) if (eq[k].size && ec[k].size) iguais++;
+    if (iguais) {
+      const pal = palavrasDe(j);
+      if (pal.length >= 2) {
+        let tot = 0, dentro = 0;
+        for (const w of pal) { const p = IDF[w] || 1; tot += p; if (q.has(w)) dentro += p; }
+        if (tot && dentro / tot >= 0.85) s = Math.max(s, iguais >= 2 ? 0.95 : 0.87);
+      }
+    }
+  }
+  return { score: Math.max(0, s), avisos: av, duro };
+}
+
+// palavras (sem números nem o «caminho ›» do capítulo) do artigo j da tabela
+const _palCache = new Map();
+function palavrasDe(j){
+  let p = _palCache.get(j);
+  if (!p) { p = [...new Set(kwSP(String(precos[j].d).replace(/^.*›/, ' ')).filter(w => !/\d/.test(w) && !UNID_TOK.has(w)))]; _palCache.set(j, p); }
+  return p;
+}
+const UNID_TOK = new Set(['bar', 'atm', 'pol', 'polegada', 'mm', 'cm', 'kg', 'lt', 'litro', 'diametro', 'equivalente', 'similar']);
+
+// candidatos ordenados pela nota final → [{ score, j, avisos, duro }]
+function candidatosMatch(descricao, unidade, topN){
+  prepararIndice(); prepararPlantas();
+  if (!IDF) return [];
+  const qk = kwSP(descricao);
+  const bq = binomio(descricao);
+  const ctx = { eq: especsDe(descricao), q: new Set(qk), qId: palavrasIdentidade(qk), bq, haEspecie: false };
+  const vistos = new Map();
+  for (const [lex, j] of searchPrecos(descricao, Math.max(topN, 40))) vistos.set(j, lex);
+  const chave = t => norm(String(t).replace(/^.*›/, ' ')).replace(/[^a-z0-9]+/g, '');
+  const kq = chave(descricao);
+  const qSet = new Set(qk); let qTot = 0; const NlogN = Math.log(precos.length + 1);
+  for (const w of qSet) qTot += IDF[w] || NlogN;
+  const lexDe = j => {            // nota de redação simples (peso das palavras em comum, nos dois sentidos)
+    const ts = new Set(precosTok[j]); if (!ts.size || !qTot) return 0;
+    let m = 0, c = 0, cTot = 0; for (const w of qSet) if (ts.has(w)) m += IDF[w] || NlogN;
+    for (const w of ts) { const p = IDF[w] || NlogN; cTot += p; if (qSet.has(w)) c += p; }
+    return Math.min(1, 0.5 * m / qTot + 0.5 * c / cTot);
+  };
+  if (bq && PLANTAS_IDX.has(bq.g)) {
+    for (const j of PLANTAS_IDX.get(bq.g)) {
+      if (!ACTIVE_SHEETS.has(precos[j].f) || !mesmaEspecie(bq, precos[j]._b)) continue;
+      ctx.haEspecie = true;
+      if (!vistos.has(j)) vistos.set(j, Math.min(0.89, lexDe(j)));
+    }
+  }
+  const out = [];
+  for (const [j, lex] of vistos) { const r = avaliarCandidato(descricao, unidade, j, lex, ctx); r.j = j; r.lex = lex; r.exato = chave(precos[j].d) === kq; out.push(r); }
+  const pv = j => (/venda/i.test(precos[j].f || '') ? 1 : 0);
+  out.sort((x, y) => (y.score - x.score) || (y.exato - x.exato) || (pv(y.j) - pv(x.j)) || (y.lex - x.lex) || (x.j - y.j));
+  return out.slice(0, topN);
+}
+
+// → { score, j } do melhor candidato que passa as guardas, ou null.
+// Prefere a folha «Preços de Venda» (as outras são tabelas de fornecedor = preço de custo) sempre que
+// lá houver um candidato ≥90%; entre candidatos empatados fica com o preço mais comum (ou a mediana).
+const eVenda = j => /venda/i.test(precos[j].f || '');
+function melhorMatchAuto(descricao, unidade){
+  if (eManutencao(descricao)) return null;
+  const ok = candidatosMatch(descricao, unidade, 40).filter(r => !r.duro);
+  if (!ok.length) return null;
+  const pvOk = ok.filter(r => eVenda(r.j) && r.score >= LIMIAR_AUTO);
+  const lista = pvOk.length ? pvOk : ok;
+  let topo = lista.filter(r => r.score >= lista[0].score - 0.005);
+  if (topo.some(r => r.exato)) topo = topo.filter(r => r.exato);          // a mesma redação ganha sempre
+  else if (topo.length > 1) {                                             // senão, a que partilha mais números (densidade 2/3m², h=40/60…)
+    const nq = todosNumeros(descricao);
+    if (nq.size) { const sim = topo.map(r => jaccard(nq, todosNumeros(precos[r.j].d)) || 0); const mx = Math.max(...sim); topo = topo.filter((r, i) => sim[i] >= mx - 1e-9); }
+  }
+  const lexMax = Math.max(...topo.map(r => r.lex));
+  topo = topo.filter(r => r.lex >= lexMax - 0.03);      // entre empatados manda a redação mais próxima
+  if (topo.length > 2) {
+    const cont = new Map(); for (const r of topo) { const p = precos[r.j].p; cont.set(p, (cont.get(p) || 0) + 1); }
+    const max = Math.max(...cont.values());
+    let alvo;
+    if (max > 1 && [...cont.values()].filter(v => v === max).length === 1) alvo = [...cont].find(([p, v]) => v === max)[0];
+    else { const ps = topo.map(r => precos[r.j].p).sort((x, y) => x - y); alvo = ps[Math.floor((ps.length - 1) / 2)]; }
+    const r = topo.find(x => precos[x.j].p === alvo);
+    return { score: r.score, j: r.j, empate: topo.length };
+  }
+  return { score: topo[0].score, j: topo[0].j };
 }
 
 function pmRecalcular(){
   clearTimeout(pmTimer);
   pmTimer = setTimeout(() => {
     if (!precos.length) { $('pmLista').innerHTML = '<div style="padding:16px;color:var(--cinza)">A tabela de preços ainda não carregou — vê o estado no topo.</div>'; return; }
-    const res = searchPrecos($('pmPesquisa').value, 40);
     const unLinha = (atual && atual.linhas[pmIdx] || {}).unidade || '';
+    // a % é a mesma que o ⚡ automático usa: redação + medidas (polegadas, Ø, PAP, vaso, altura) + espécie
+    const res = candidatosMatch($('pmPesquisa').value, unLinha, 40);
     $('pmLista').innerHTML = res.length ? res.map(r => {
-      const a = precos[r[1]];
-      const pct = Math.round(r[0] * 100);
-      const cls = pct >= 80 ? 'alto' : (pct >= 50 ? 'medio' : 'baixo');
-      const unDif = (!unidCompat(unLinha, a.u) ? ' · <b style="color:#a33">⚠ unidade ≠ ' + esc(unLinha) + '</b>' : '') +
-        (eManutencao(a.d) ? ' · <b style="color:#854F0B">🔧 manutenção — caso a caso</b>' : '');
-      return '<div class="pm-item" onclick="aplicarMatch(' + r[1] + ')">' +
+      const a = precos[r.j];
+      const pct = Math.round(r.score * 100);
+      const cls = r.duro ? 'baixo' : (pct >= 80 ? 'alto' : (pct >= 50 ? 'medio' : 'baixo'));
+      const unDif = r.avisos.length ? ' · <b style="color:' + (r.duro ? '#a33' : '#854F0B') + '">⚠ ' + esc(r.avisos.join(' · ')) + '</b>' : '';
+      return '<div class="pm-item" onclick="aplicarMatch(' + r.j + ')">' +
         '<span class="pm-badge ' + cls + '">' + pct + '%</span>' +
         '<span class="pm-desc">' + esc(a.d) + '<div class="pm-meta">' + esc(a.f || '') + ' · ' + esc(a.u || '—') + (a.c ? ' · ' + esc(a.c) : '') + unDif + '</div></span>' +
         '<span class="pm-preco">' + fmtEur(a.p) + '</span>' +
@@ -3478,14 +3755,15 @@ function amProximo(){
   const i = st.fila[st.pos];
   const l = atual.linhas[i];
   const g = melhorMatchAuto(l.descricao || '', l.unidade);   // protegido (unidade + identidade)
-  const top = g ? [g.score, g.j] : searchPrecos(l.descricao || '', 10).find(([, j]) => !eManutencao(precos[j].d));
+  const alt1 = g ? null : candidatosMatch(l.descricao || '', l.unidade, 10).find(r => !eManutencao(precos[r.j].d));
+  const top = g ? [g.score, g.j] : (alt1 ? [alt1.score, alt1.j] : null);
   if (!top || top[0] < st.limiar) { st.sem++; st.pos++; setTimeout(amProximo, 0); return; }
   st.actual = { i, j: top[1] };
   const a = precos[top[1]];
   const pct = Math.round(top[0] * 100);
   const aviso = g ? '' : (!unidCompat(l.unidade, a.u)
     ? '⚠ Unidade diferente (' + esc(l.unidade || '—') + ' vs ' + esc(a.u || '—') + ') — confirma antes de aplicar'
-    : '⚠ Pode não ser o mesmo artigo (material/tipo diferente) — confirma antes de aplicar');
+    : '⚠ ' + (alt1 && alt1.avisos.length ? esc(alt1.avisos.join(' · ')) : 'Pode não ser o mesmo artigo (material/tipo diferente)') + ' — confirma antes de aplicar');
   $('amCorpo').innerHTML =
     '<div class="am-sec">Artigo do orçamento</div>' +
     '<div class="am-cartao">' +
