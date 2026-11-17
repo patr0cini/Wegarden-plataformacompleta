@@ -333,6 +333,7 @@ footer{
 .xls-tab tr:first-child td{background:#f4f7f2;font-weight:600;position:sticky;top:0}
 .ln-auto{display:inline-block;margin-left:6px;font-size:10px;font-weight:700;color:#2f6b2a;background:#e7f2e2;border:1px solid #cfe6c6;border-radius:10px;padding:1px 6px;vertical-align:middle}
 .ln-auto-row td{background:#f6faf4}
+.ln-xl{margin-left:5px;font-size:11px}
 .am-resumo{text-align:center;padding:10px 0}
 .am-resumo .nums{display:flex;justify-content:center;gap:26px;margin-top:14px}
 .am-resumo .nums > div{display:flex;flex-direction:column;font-size:12px;color:var(--cinza)}
@@ -951,7 +952,7 @@ const FN_EMAIL = NOVO.url + '/functions/v1/email-pedido';
 const FN_SPFICH = NOVO.url + '/functions/v1/sp-ficheiros';
 const FN_LEMBNOTIF = NOVO.url + '/functions/v1/lembretes-notificar';
 const FN_TRIAGEM = NOVO.url + '/functions/v1/triagem-emails';
-const BUILD = '2026-11-13a'; // ← actualizar em CADA publicação (data + letra)
+const BUILD = '2026-11-17a'; // ← actualizar em CADA publicação (data + letra)
 
 // Marca a bandeira/categoria do email no Outlook conforme o estado do pedido, via edge function
 // (credenciais de aplicação — não precisa de login MS). Fire-and-forget: nunca bloqueia nem
@@ -1001,7 +1002,7 @@ const numPT = v => { // aceita "1.234,56" e "1234.56"
 
 /* Alterações não gravadas no editor de orçamentos (guarda contra perda de trabalho) */
 let sujo = false;
-function marcarSujo(){ sujo = true; asAgendar(); }
+function marcarSujo(){ sujo = true; asAgendar(); if (typeof sxAgendarEnvio === 'function') sxAgendarEnvio(); }
 
 function toast(msg, tipo){
   const t = $('toast');
@@ -2989,7 +2990,7 @@ function asAgendar(){
   const temDB = !atual.novo;
   if (!temSP && !temDB) return;
   clearTimeout(asTimer);
-  asTimer = setTimeout(asExecutar, 30000);
+  asTimer = setTimeout(asExecutar, sxAtivo() ? 5000 : 30000);
   asActualizarIndicador('pendente');
 }
 
@@ -2999,7 +3000,8 @@ async function asExecutar(){
   asActualizarIndicador('a guardar');
   try {
     if (!atual.novo && sujo) await guardarOrcamento(true);  // BD primeiro, em silêncio
-    if (atual.spOrigem && atual.spFill && spConta)
+    if (sxAtivo()) { if (sx.timerEnvio) { clearTimeout(sx.timerEnvio); await sxEnviar(); } }   // ao vivo: o Excel já vai sendo escrito célula a célula
+    else if (atual.spOrigem && atual.spFill && spConta && !/\.xls$/i.test(atual.spOrigem.nome || ''))
       await gerarExcelOriginal();  // backend faz download + preenche + upload
     asUltimoErro = null;
     asActualizarIndicador('guardado');
@@ -3022,7 +3024,7 @@ function asActualizarIndicador(estado){
   if (!lbl) return;
   const icons = { pendente:'⏱', 'a guardar':'⟳', guardado:'✓', bloqueado:'🔒', erro:'⚠' };
   const cores = { pendente:'var(--cinza)', 'a guardar':'var(--cinza)', guardado:'#2e6b2a', bloqueado:'#e67e00', erro:'#a33' };
-  const titulos = { pendente:'A guardar em breve…', 'a guardar':'A guardar…', guardado:'Guardado no SharePoint', bloqueado:'Ficheiro bloqueado (Excel Online aberto) — vai tentar de novo em 60s', erro:'Erro ao guardar: ' + (asUltimoErro || '') };
+  const titulos = { pendente:'A guardar em breve…', 'a guardar':'A guardar…', guardado:(typeof sxAtivo === 'function' && sxAtivo()) ? 'Guardado na plataforma (o Excel é actualizado ao vivo)' : 'Guardado no SharePoint', bloqueado:'Ficheiro bloqueado (Excel Online aberto) — vai tentar de novo em 60s', erro:'Erro ao guardar: ' + (asUltimoErro || '') };
   const ic = $('asIndicador');
   if (!ic) {
     const sp = document.createElement('span');
@@ -3033,6 +3035,267 @@ function asActualizarIndicador(estado){
   const el = $('asIndicador');
   if (el) { el.textContent = icons[estado] || ''; el.style.color = cores[estado] || 'var(--cinza)'; el.title = titulos[estado] || ''; }
 }
+
+/* ============================================================
+   Sincronização AO VIVO com o Excel do SharePoint (build 2026-11-17a)
+   • Plataforma → Excel: cada alteração escreve só as células que mudaram
+     (preço, quantidade, total) pela API de livros do Excel, numa sessão
+     partilhada — funciona com o ficheiro aberto no Excel Online e não
+     substitui o ficheiro (era isso que dava «ficheiro aberto/bloqueado»).
+   • Excel → Plataforma: com o orçamento aberto, lê o bloco do mapa a cada
+     SX_INTERVALO ms (30 s com o separador escondido) e aplica o que mudou.
+   • Conflito (mesma célula mudada dos dois lados): fica o valor do Excel e avisa.
+   • Linhas cuja descrição não bate com o Excel (linhas inseridas/apagadas)
+     ficam fora da sincronização. Fórmulas na coluna de total não são tocadas.
+   • Só .xlsx (os .xls têm de ser convertidos).
+   ============================================================ */
+const SX_INTERVALO = 10000, SX_INTERVALO_OCULTO = 30000, SX_DEBOUNCE = 1500;
+let sx = null;
+
+function sxAtivo(){ return !!(sx && sx.ativo && atual && atual.spOrigem && sx.itemId === atual.spOrigem.itemId); }
+function sxColL(n){ let s = ''; n = n + 1; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+function sxNum(v){ if (v === null || v === undefined || v === '') return 0; return typeof v === 'number' ? v : numPT(v); }
+function sxIgual(a, b){ return Math.abs((+a || 0) - (+b || 0)) < 0.00005; }
+function sxTxt(s){ return norm(String(s || '')).replace(/\s+/g, ' ').trim(); }
+
+function sxInd(estado, extra){
+  const lbl = $('spOrigemLabel'); if (!lbl) return;
+  let el = $('sxIndicador');
+  if (!el) { el = document.createElement('span'); el.id = 'sxIndicador'; el.style.cssText = 'font-size:11px;margin-left:8px;font-weight:600;white-space:nowrap'; lbl.appendChild(el); }
+  const E = {
+    'a ligar':   ['⇄ a ligar…', 'var(--cinza)', 'A ligar ao Excel no SharePoint…'],
+    'ao vivo':   ['⇄ ao vivo', '#2e6b2a', 'Sincronização ao vivo com o Excel: as alterações vão para o Excel em ~2 s e as do Excel aparecem aqui em ~10 s.'],
+    'a enviar':  ['⇄ a enviar…', 'var(--cinza)', 'A escrever no Excel…'],
+    'conflito':  ['⇄ conflito', '#e67e00', 'A mesma célula foi alterada no Excel e aqui — ficou o valor do Excel.'],
+    'parcial':   ['⇄ ao vivo (parcial)', '#e67e00', 'Algumas linhas não batem com o Excel (linhas inseridas/apagadas) e não são sincronizadas.'],
+    'xls':       ['⇄ indisponível (.xls)', '#a33', 'O Excel está no formato antigo .xls — converte-o para .xlsx para ter sincronização ao vivo.'],
+    'erro':      ['⇄ sem ligação', '#a33', 'Não consegui falar com o Excel'],
+    'desligado': ['', 'var(--cinza)', '']
+  }[estado] || ['', 'var(--cinza)', ''];
+  el.textContent = E[0]; el.style.color = E[1]; el.title = E[2] + (extra ? '\n' + extra : '');
+}
+
+/* pedido à API de livros (devolve {status, json}); recria a sessão se expirou */
+async function sxPedido(method, caminho, body, semSessao){
+  const tok = await spToken();
+  const h = { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' };
+  if (!semSessao && sx && sx.sid) h['workbook-session-id'] = sx.sid;
+  const r = await fetch('https://graph.microsoft.com/v1.0' + caminho, { method, headers: h, body: body ? JSON.stringify(body) : undefined });
+  let j = null; try { j = await r.json(); } catch (_) {}
+  return { status: r.status, json: j };
+}
+function sxBase(){ return '/drives/' + sx.driveId + '/items/' + sx.itemId + '/workbook'; }
+function sxFolhaPath(){ return sxBase() + "/worksheets('" + encodeURIComponent(sx.folha.replace(/'/g, "''")) + "')"; }
+function sxSessaoInvalida(r){ const c = r && r.json && r.json.error && (r.json.error.code || '') + ' ' + ((r.json.error.innerError || {}).code || ''); return r.status === 404 || /session/i.test(c || ''); }
+async function sxAbrirSessao(){
+  const r = await sxPedido('POST', sxBase() + '/createSession', { persistChanges: true }, true);
+  if (r.status !== 201 && r.status !== 200) throw new Error((r.json && r.json.error && r.json.error.message) || ('HTTP ' + r.status));
+  sx.sid = r.json.id;
+}
+
+/* lê o bloco do mapa (da coluna Art. até à última coluna usada, das linhas sincronizadas) */
+async function sxLer(){
+  const addr = sxColL(sx.c0) + sx.r0 + ':' + sxColL(sx.c1) + sx.r1;
+  let r = await sxPedido('GET', sxFolhaPath() + "/range(address='" + addr + "')?$select=values,formulas");
+  if (sxSessaoInvalida(r)) { await sxAbrirSessao(); r = await sxPedido('GET', sxFolhaPath() + "/range(address='" + addr + "')?$select=values,formulas"); }
+  if (r.status !== 200) throw new Error((r.json && r.json.error && r.json.error.message) || ('HTTP ' + r.status));
+  const out = {};
+  r.json.values.forEach((linha, k) => {
+    const row = sx.r0 + k, f = r.json.formulas[k] || [];
+    out[row] = {
+      p: sxNum(linha[sx.cp - sx.c0]),
+      q: sx.cq > -1 ? sxNum(linha[sx.cq - sx.c0]) : null,
+      vFormula: sx.cv > -1 && typeof f[sx.cv - sx.c0] === 'string' && f[sx.cv - sx.c0].startsWith('='),
+      pFormula: typeof f[sx.cp - sx.c0] === 'string' && String(f[sx.cp - sx.c0]).startsWith('='),
+      texto: sxTxt(linha.filter(x => typeof x === 'string').join(' '))
+    };
+  });
+  return out;
+}
+
+/* escreve células em lotes de 20 (Graph $batch) */
+async function sxEscrever(celulas){   // [{addr, valor}]
+  for (let i = 0; i < celulas.length; i += 20) {
+    const lote = celulas.slice(i, i + 20);
+    const mk = () => ({ requests: lote.map((c, k) => ({ id: String(k + 1), method: 'PATCH',
+      url: sxFolhaPath() + "/range(address='" + c.addr + "')",
+      headers: { 'Content-Type': 'application/json', 'workbook-session-id': sx.sid },
+      body: { values: [[c.valor]] } })) });
+    const tok = await spToken();
+    let r = await fetch('https://graph.microsoft.com/v1.0/$batch', { method: 'POST', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify(mk()) });
+    let j = await r.json();
+    let falhas = (j.responses || []).filter(x => x.status >= 300);
+    if (falhas.length && falhas.some(x => x.status === 404 || /session/i.test(JSON.stringify(x.body || '')))) {
+      await sxAbrirSessao();
+      r = await fetch('https://graph.microsoft.com/v1.0/$batch', { method: 'POST', headers: { Authorization: 'Bearer ' + (await spToken()), 'Content-Type': 'application/json' }, body: JSON.stringify(mk()) });
+      j = await r.json(); falhas = (j.responses || []).filter(x => x.status >= 300);
+    }
+    if (!r.ok || falhas.length) throw new Error('Excel recusou ' + (falhas.length || lote.length) + ' célula(s): ' + ((falhas[0] && falhas[0].body && falhas[0].body.error && falhas[0].body.error.message) || ('HTTP ' + r.status)));
+  }
+}
+
+function sxLinhas(){ return atual.linhas.filter(l => l.tipo === 'artigo' && l._row && !l._sxOff); }
+function sxCelulasDe(l, k, tudo){
+  const cel = [];
+  const muP = tudo || !sxIgual(l.preco_unitario, k.p), muQ = sx.cq > -1 && (tudo || !sxIgual(l.quantidade, k.q));
+  if (muP && !k.pFormula) cel.push({ addr: sxColL(sx.cp) + l._row, valor: +(l.preco_unitario || 0) });
+  if (muQ) cel.push({ addr: sxColL(sx.cq) + l._row, valor: +(l.quantidade || 0) });
+  if ((muP || muQ) && sx.cv > -1 && !k.vFormula) cel.push({ addr: sxColL(sx.cv) + l._row, valor: Math.round((l.quantidade || 0) * (l.preco_unitario || 0) * 100) / 100 });
+  return cel;
+}
+
+/* aplica na plataforma um valor vindo do Excel (sem perder o foco de quem está a escrever) */
+function sxAplicarDoExcel(l, e){
+  const i = atual.linhas.indexOf(l);
+  l.preco_unitario = e.p; if (e.q !== null) l.quantidade = e.q;
+  delete l._auto; l._doExcel = true;
+  const set = (f, v) => { const inp = document.querySelector('#linhasCorpo input[data-i="' + i + '"][data-f="' + f + '"]'); if (inp && document.activeElement !== inp) inp.value = v; };
+  set('preco_unitario', l.preco_unitario); set('quantidade', l.quantidade);
+  const cel = $('lt' + i); if (cel) cel.textContent = fmtEur((l.quantidade || 0) * (l.preco_unitario || 0));
+  const tr = cel && cel.closest('tr');
+  if (tr) { tr.classList.remove('ln-auto-row'); const b = tr.querySelector('.ln-auto'); if (b) b.remove();
+    if (!tr.querySelector('.ln-xl')) { const n = tr.querySelector('.col-num'); if (n) n.insertAdjacentHTML('beforeend', '<span class="ln-xl" title="Alterado no Excel">📗</span>'); } }
+}
+function sxLinhaEmFoco(){ const a = document.activeElement; return a && a.closest && a.closest('#linhasCorpo') && a.dataset ? +a.dataset.i : -1; }
+
+async function sxIniciar(){
+  const o = atual.spOrigem, f = atual.spFill;
+  const cp = f.startCol + f.colP, cq = f.colQ > -1 ? f.startCol + f.colQ : -1, cv = f.colV > -1 ? f.startCol + f.colV : -1;
+  const rows = atual.linhas.filter(l => l.tipo === 'artigo' && l._row).map(l => l._row);
+  if (!rows.length || f.colP < 0) { sx = null; sxInd('desligado'); return; }
+  sx = { ativo: false, iniciando: true, driveId: o.driveId, itemId: o.itemId, folha: f.nomeFolha, cp, cq, cv,
+         c0: Math.min(f.startCol, cp, cq > -1 ? cq : cp, cv > -1 ? cv : cp), c1: Math.max(cp, cq, cv),
+         r0: Math.min(...rows), r1: Math.max(...rows), conhecido: {}, timerPoll: null, timerEnvio: null, ocupado: false };
+  sxInd('a ligar');
+  try {
+    await sxAbrirSessao();
+    const ex = await sxLer();
+    // validar a correspondência linha a linha pela descrição
+    let off = 0;
+    for (const l of atual.linhas) {
+      if (l.tipo !== 'artigo' || !l._row) continue;
+      const e = ex[l._row], d = sxTxt(l.descricao).slice(0, 25);
+      l._sxOff = !e || (d.length >= 4 && !e.texto.includes(d));
+      if (l._sxOff) off++;
+    }
+    const n = rows.length;
+    if (off > n * 0.3) { sx.ativo = false; sx.iniciando = false; sx.falhouEm = Date.now() + 1e12; sxInd('erro', off + ' de ' + n + ' linhas não batem com o Excel — o mapa foi alterado (linhas inseridas/apagadas?). Sincronização desligada.'); toast('Sincronização com o Excel desligada: ' + off + ' de ' + n + ' linhas não batem com o ficheiro.', 'erro'); return; }
+    // reconciliação inicial: quem mudou por último?
+    let maisRecenteExcel = false;
+    try {
+      const it = await gJson('/drives/' + sx.driveId + '/items/' + sx.itemId + '?$select=lastModifiedDateTime');
+      const tExcel = Date.parse(it.lastModifiedDateTime), tBD = Date.parse((atual.header && (atual.header.atualizado_em || atual.header.criado_em)) || 0);
+      maisRecenteExcel = !atual.novo && tExcel > tBD + 90000;
+    } catch (_) {}
+    let trazidos = 0; const enviar = [];
+    for (const l of sxLinhas()) {
+      const e = ex[l._row];
+      const dif = !sxIgual(l.preco_unitario, e.p) || (e.q !== null && !sxIgual(l.quantidade, e.q));
+      if (dif && maisRecenteExcel) { sxAplicarDoExcel(l, e); trazidos++; }
+      else if (dif) enviar.push(...sxCelulasDe(l, e, false));
+      sx.conhecido[l._row] = { p: e.p, q: e.q, vFormula: e.vFormula, pFormula: e.pFormula };
+    }
+    if (enviar.length) { await sxEscrever(enviar); for (const l of sxLinhas()) sx.conhecido[l._row] = { ...sx.conhecido[l._row], p: l.preco_unitario, q: sx.cq > -1 ? l.quantidade : null }; }
+    sx.ativo = true; sx.iniciando = false;
+    if (trazidos) { atualizarTotal(); sujo = true; asAgendar(); toast('📗 ' + trazidos + ' alteraç' + (trazidos !== 1 ? 'ões' : 'ão') + ' feita' + (trazidos !== 1 ? 's' : '') + ' no Excel trazida' + (trazidos !== 1 ? 's' : '') + ' para o orçamento.'); }
+    sxInd(off ? 'parcial' : 'ao vivo', off ? off + ' linha(s) fora da sincronização.' : (enviar.length ? enviar.length + ' célula(s) actualizadas no Excel ao ligar.' : ''));
+    sxAgendarLeitura();
+  } catch (e) {
+    console.warn('sync Excel:', e);
+    if (sx) { sx.ativo = false; sx.iniciando = false; sx.falhouEm = Date.now(); }
+    sxInd('erro', String(e.message || e));
+  }
+}
+
+function sxAgendarLeitura(){
+  if (!sx) return; clearTimeout(sx.timerPoll);
+  sx.timerPoll = setTimeout(sxLeitura, document.visibilityState === 'visible' ? SX_INTERVALO : SX_INTERVALO_OCULTO);
+}
+async function sxLeitura(){
+  if (!sxAtivo()) return;
+  if (sx.ocupado || sx.timerEnvio) { sxAgendarLeitura(); return; }   // há alterações a caminho do Excel
+  sx.ocupado = true;
+  try {
+    const ex = await sxLer(), foco = sxLinhaEmFoco(); let n = 0, adiadas = 0;
+    for (const l of sxLinhas()) {
+      const e = ex[l._row], k = sx.conhecido[l._row]; if (!e || !k) continue;
+      k.vFormula = e.vFormula; k.pFormula = e.pFormula;
+      const mudouExcel = !sxIgual(e.p, k.p) || (e.q !== null && !sxIgual(e.q, k.q));
+      if (!mudouExcel) continue;
+      if (atual.linhas.indexOf(l) === foco) { adiadas++; continue; }   // está a ser editada aqui
+      sxAplicarDoExcel(l, e); k.p = e.p; k.q = e.q; n++;
+    }
+    if (n) { atualizarTotal(); sujo = true; asAgendar(); }
+    sxInd(atual.linhas.some(l => l._sxOff) ? 'parcial' : 'ao vivo', n ? n + ' alteração(ões) vinda(s) do Excel às ' + new Date().toLocaleTimeString('pt-PT') : '');
+  } catch (e) { sxInd('erro', String(e.message || e)); }
+  finally { if (sx) { sx.ocupado = false; sxAgendarLeitura(); } }
+}
+
+function sxAgendarEnvio(){
+  if (!atual) return;
+  if (!sx && atual.spOrigem && atual.spFill && spConta) { sxGarantir(); return; }
+  if (!sxAtivo()) return;
+  clearTimeout(sx.timerEnvio);
+  sx.timerEnvio = setTimeout(sxEnviar, SX_DEBOUNCE);
+}
+async function sxEnviar(){
+  if (!sxAtivo()) return;
+  if (sx.ocupado) { sx.timerEnvio = setTimeout(sxEnviar, 500); return; }
+  sx.timerEnvio = null; sx.ocupado = true;
+  try {
+    const mud = sxLinhas().filter(l => { const k = sx.conhecido[l._row]; return k && (!sxIgual(l.preco_unitario, k.p) || (sx.cq > -1 && !sxIgual(l.quantidade, k.q))); });
+    if (!mud.length) return;
+    sxInd('a enviar');
+    const ex = await sxLer(); const cel = [], ok = []; let conf = 0;
+    for (const l of mud) {
+      const k = sx.conhecido[l._row], e = ex[l._row];
+      if (e && (!sxIgual(e.p, k.p) || (e.q !== null && !sxIgual(e.q, k.q)))) {   // mudou no Excel entretanto → fica o Excel
+        sxAplicarDoExcel(l, e); k.p = e.p; k.q = e.q; conf++; continue;
+      }
+      cel.push(...sxCelulasDe(l, k, false)); ok.push(l);
+    }
+    if (cel.length) await sxEscrever(cel);
+    for (const l of ok) { const k = sx.conhecido[l._row]; k.p = l.preco_unitario; if (sx.cq > -1) k.q = l.quantidade; }
+    if (conf) { atualizarTotal(); toast('⚠ ' + conf + ' linha(s) foram alteradas no Excel ao mesmo tempo — ficou o valor do Excel.', 'erro'); sxInd('conflito'); }
+    else sxInd(atual.linhas.some(l => l._sxOff) ? 'parcial' : 'ao vivo', 'Última escrita no Excel às ' + new Date().toLocaleTimeString('pt-PT'));
+  } catch (e) { sxInd('erro', String(e.message || e)); toast('Não consegui escrever no Excel: ' + (e.message || e), 'erro'); }
+  finally { if (sx) sx.ocupado = false; }
+}
+
+/* «Guardar no SharePoint» com sincronização ativa: reescreve todas as células sincronizadas */
+async function sxForcarTudo(){
+  if (sx.timerEnvio) { clearTimeout(sx.timerEnvio); sx.timerEnvio = null; }
+  while (sx.ocupado) await new Promise(r => setTimeout(r, 200));
+  sx.ocupado = true;
+  try {
+    const ex = await sxLer(); const cel = [];
+    for (const l of sxLinhas()) { const e = ex[l._row]; if (e) cel.push(...sxCelulasDe(l, { ...e }, true)); }
+    await sxEscrever(cel);
+    for (const l of sxLinhas()) sx.conhecido[l._row] = { ...(sx.conhecido[l._row] || {}), p: l.preco_unitario, q: sx.cq > -1 ? l.quantidade : null };
+    return cel.length;
+  } finally { sx.ocupado = false; }
+}
+
+/* liga/religa a sincronização ao orçamento aberto (chamado ao abrir e quando muda o ficheiro de origem) */
+function sxGarantir(){
+  if (!atual || !atual.spOrigem || !atual.spFill || !spConta) { if (sx) sxParar(); return; }
+  if (atual._logoPendente) return;                      // o logótipo substitui o ficheiro — ligar depois
+  if (!/\.xlsx$/i.test(atual.spOrigem.nome || '')) { if (sx) sxParar(); sx = null; sxInd('xls'); return; }
+  if (sx && sx.itemId === atual.spOrigem.itemId && (sx.ativo || sx.iniciando)) return;
+  if (sx && sx.itemId === atual.spOrigem.itemId && sx.falhouEm && Date.now() - sx.falhouEm < 60000) return;   // falhou há pouco — não insistir a cada tecla
+  if (sx) sxParar();
+  sxIniciar();
+}
+async function sxParar(){
+  if (!sx) return;
+  const s = sx;
+  try { if (s.timerEnvio && s.ativo) { clearTimeout(s.timerEnvio); s.timerEnvio = null; await sxEnviar(); } } catch (_) {}
+  clearTimeout(s.timerPoll); clearTimeout(s.timerEnvio);
+  if (sx === s) sx = null;
+  if (s.sid) { try { const tok = await spToken(); fetch('https://graph.microsoft.com/v1.0/drives/' + s.driveId + '/items/' + s.itemId + '/workbook/closeSession', { method: 'POST', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json', 'workbook-session-id': s.sid }, body: '{}' }); } catch (_) {} }
+  sxInd('desligado');
+}
+document.addEventListener('visibilitychange', () => { if (sxAtivo() && document.visibilityState === 'visible') { clearTimeout(sx.timerPoll); sxLeitura(); } });
 
 function abrirEditor(){
   $('orcLista').style.display = 'none';
@@ -3058,11 +3321,14 @@ function abrirEditor(){
   actualizarSpOrigemLabel();
   renderLinhas();
   sujo = false; // abrir não conta como alteração
+  if (sx) sxParar();
+  sxGarantir();
 }
 
 function fecharEditor(){
   if (sujo && !confirm('Tens alterações não gravadas neste orçamento.\n\nSair sem gravar?')) return;
   sujo = false;
+  if (sx) sxParar();
   atual = null;
   clearTimeout(asTimer);
   $('orcEditor').style.display = 'none';
@@ -3118,7 +3384,8 @@ function renderLinhas(){
     }
     return '<tr' + (l._auto ? ' class="ln-auto-row"' : '') + '>' +
       '<td class="col-num clicavel" onclick="abrirMatching(' + i + ')" title="Procurar na tabela de preços">' + l.num +
-        (l._auto ? '<span class="ln-auto" title="Preenchido automaticamente (' + l._auto + '%) — valida ou edita">⚡' + l._auto + '%</span>' : '') + '</td>' +
+        (l._auto ? '<span class="ln-auto" title="Preenchido automaticamente (' + l._auto + '%) — valida ou edita">⚡' + l._auto + '%</span>' : '') +
+        (l._doExcel ? '<span class="ln-xl" title="Alterado no Excel">📗</span>' : '') + '</td>' +
       '<td><input data-i="' + i + '" data-f="descricao" value="' + esc(l.descricao) + '" placeholder="Descrição"></td>' +
       '<td><input data-i="' + i + '" data-f="unidade" value="' + esc(l.unidade) + '" placeholder="un"></td>' +
       '<td><input class="num" data-i="' + i + '" data-f="quantidade" value="' + (l.quantidade ?? '') + '"></td>' +
@@ -3157,6 +3424,7 @@ $('linhasCorpo').addEventListener('change', e => {
   if (!l || l.tipo !== 'artigo') return;
   l.preco_unitario = numPT(inp.value);
   const n = propagarPreco(l);
+  if (n) marcarSujo();
   if (n) { renderLinhas(); toast('Preço aplicado a ' + n + ' artigo' + (n !== 1 ? 's' : '') + ' igual' + (n !== 1 ? 'is' : '') + ' (outras frações/pisos).'); }
 });
 
@@ -3959,6 +4227,12 @@ async function gResolverUrl(rawUrl){
 function spAbrir(){ spAbrirModo('importar'); }
 async function spGuardarExcel(){
   if (!atual) return;
+  if (atual.spOrigem && /\.xls$/i.test(atual.spOrigem.nome || '')) { toast('O Excel de origem é .xls (formato antigo) — não consigo escrever nele. Converte-o para .xlsx.', 'erro'); return; }
+  if (sxAtivo()) {   // ao vivo: reescreve as células sincronizadas (não substitui o ficheiro → sem «ficheiro aberto»)
+    try { toast('A sincronizar com o Excel…'); const n = await sxForcarTudo(); toast('✓ Excel actualizado (' + n + ' células) — ' + atual.spOrigem.nome); }
+    catch (e) { toast('Não consegui escrever no Excel: ' + (e.message || e), 'erro'); }
+    return;
+  }
   if (atual.spOrigem && atual.spFill) {
     // preencher o ficheiro ORIGINAL via backend openpyxl (preserva 100% da formatação)
     // o backend faz download + preenche + upload — não precisamos de fazer PUT aqui
@@ -4623,9 +4897,12 @@ function cmConfirmar(){
   // inserir o logótipo no Excel original do SharePoint, na célula escolhida (não bloqueia a importação)
   if (preservar && logoCell && window.atual && atual.spOrigem) {
     toast('A inserir o logótipo no Excel…');
+    atual._logoPendente = true; if (sx) sxParar();
+    const alvo = atual;
     inserirLogoNoExcel(atual.spOrigem.driveId, atual.spOrigem.itemId, logoCell, logoSheet)
       .then(() => toast('🌿 Logótipo inserido na célula ' + logoCell))
-      .catch(e => toast('Não consegui inserir o logótipo: ' + e.message, 'erro'));
+      .catch(e => toast('Não consegui inserir o logótipo: ' + e.message, 'erro'))
+      .finally(() => { delete alvo._logoPendente; if (atual === alvo) sxGarantir(); });
   }
 }
 
